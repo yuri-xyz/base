@@ -1,5 +1,5 @@
 from @std/Args import { contains as argsContains, findFlagValueOpt, removeBoolFlag }
-from @std/List import { map, filter, uniq }
+from @std/List import { map, filter, filterMap, uniq }
 from @std/Option import { orElseOption }
 from @std/String import {
   trim,
@@ -54,11 +54,21 @@ fun normalizePlanStatus(raw: String): Option String {
 fun parseTagsCsv(raw: String): List String {
   let pieces = splitCsv(raw);
 
-  uniq(filter(map(pieces, trim), (piece) => { piece != "" }))
+  uniq(filterMap(pieces, normalizeTagName))
 }
 
 fun splitCsv(raw: String): List String {
   split(raw, ",")
+}
+
+@public
+fun normalizeTagName(raw: String): Option String {
+  let normalized = toLowerCase(trim(raw));
+
+  if normalized == "":
+    Option.None
+  else:
+    Option.Some(normalized)
 }
 
 @public

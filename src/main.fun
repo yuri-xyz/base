@@ -2,28 +2,28 @@ from @std/Output import { line, errLine }
 from @std/FS import { readFile }
 from @std/Process import { userArgs, exit }
 from @std/String import { parseIntOr, trim, join }
-from "./Docs" import { listDocs, showDoc, addDoc, updateDoc, removeDoc, searchDocs }
-from "./Models" import { Scope, Task, TaskPatch, DocSearchResult, RoadmapItem, RoadmapPatch }
+from "./DocSearchCli" import { runDocSearchCommand }
+from "./Docs" import { listDocs, showDoc, addDoc, updateDoc, removeDoc }
+from "./Models" import { Scope, Task, TaskPatch, RoadmapItem, RoadmapPatch }
 from "./PlanCli" import { runPlanCommand, planUsage }
 from "./Roadmap" import {
   listRoadmap,
   addRoadmapItem,
   updateRoadmapItem,
   moveRoadmapItem,
-  markRoadmapActive,
-  markRoadmapDone,
   removeRoadmapItem
 }
 from "./Scope" import { resolveScope }
+from "./SearchCli" import { runGlobalSearchCommand }
+from "./StatusCli" import { normalizeStatusOption, normalizeRoadmapStatusOption }
 from "./Store" import { isInitialized, initialize, requireInitialized }
-from "./Tasks" import { listTasks, addTask, updateTask, markTaskDone, removeTask }
+from "./TagsCli" import { runTagsCommand, tagsUsage }
+from "./Tasks" import { listTasks, addTask, updateTask, removeTask }
 from "./Util" import {
   findOptionValue,
   hasFlag,
   stripToken,
   parseTagsCsv,
-  normalizeStatus,
-  normalizeRoadmapStatus,
   normalizeDocName
 }
 
@@ -36,21 +36,18 @@ fun main(): Unit effects { IO } {
 
   match args with:
     | [] -> showOverview(scope)
-    | ["init", ..._rest] -> runInit(scope)
+    | ["init"] -> runInit(scope)
     | ["tasks", ...rest] -> runTasks(scope, rest)
+    | ["tags", ...rest] -> runTags(scope, rest)
     | ["plan", ...rest] -> runPlan(scope, rest)
     | ["roadmap", ...rest] -> runRoadmap(scope, rest)
     | ["docs", ...rest] -> runDocs(scope, rest)
-    | ["kb", "search", query, ...opts] -> runDocSearch(scope, query, opts)
-    | ["kb", ..._rest] -> {
-      line("Usage: base kb search <query> [--limit <n>]")
-    }
-    | ["help", ..._rest] -> printHelp()
-    | ["--help", ..._rest] -> printHelp()
+    | ["search", query, ...opts] -> runSearch(scope, query, opts)
+    | ["help"] -> printHelp()
+    | ["--help"] -> printHelp()
     | _ ->
         errLine("Error: unknown command");
         printHelp();
-
         exit(1)
 }
 
@@ -69,23 +66,25 @@ fun printHelp(): Unit effects { IO } {
   line(
     "  base tasks update <taskId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>] [-t|--tags <csv>]",
   );
-  line("  base tasks done <taskId>");
+  line("  base tasks set-status <taskId> <todo|in_progress|done>");
   line("  base tasks remove <taskId>");
+  line("  base tags list");
+  line("  base tags add <tag>");
+  line("  base tags remove <tag>");
+  line("  base tags rename <from> <to>");
   line("  base plan list [--all]");
   line("  base plan create <title> [-d|--description <text>]");
   line("  base plan show <planId>");
+  line("  base plan set-status <planId> <planned|active|done>");
   line(
     "  base plan update <planId> [--title <text>] [-d|--description <text>] [--status <planned|active|done>]",
   );
-  line("  base plan active <planId>");
-  line("  base plan done <planId>");
   line("  base plan remove <planId>");
   line("  base plan add-item <planId> <title> [-d|--description <text>]");
   line(
     "  base plan update-item <planId> <itemId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>]",
   );
-  line("  base plan progress-item <planId> <itemId>");
-  line("  base plan done-item <planId> <itemId>");
+  line("  base plan set-item-status <planId> <itemId> <todo|in_progress|done>");
   line("  base plan move-item <planId> <itemId> <position>");
   line("  base plan remove-item <planId> <itemId>");
   line("  base roadmap list");
@@ -93,9 +92,8 @@ fun printHelp(): Unit effects { IO } {
   line(
     "  base roadmap update <itemId> [--goal <text>] [-d|--description <text>] [--status <planned|active|done>]",
   );
+  line("  base roadmap set-status <itemId> <planned|active|done>");
   line("  base roadmap move <itemId> <position>");
-  line("  base roadmap active <itemId>");
-  line("  base roadmap done <itemId>");
   line("  base roadmap remove <itemId>");
   line("  base docs list");
   line("  base docs show <name>");
@@ -103,8 +101,7 @@ fun printHelp(): Unit effects { IO } {
   line("  base docs update <name> [-c|--content <text>] [-f|--file <path>]");
   line("  base docs remove <name>");
   line("  base docs search <query> [-l|--limit <n>]");
-
-  line("  base kb search <query> [-l|--limit <n>]")
+  line("  base search <query> [-l|--limit <n>]");
 }
 
 fun runInit(scope: Scope): Unit effects { IO } {
@@ -169,11 +166,11 @@ fun runTasks(scope: Scope, rest: List String): Unit effects { IO } {
     | ["list", ...opts] -> runTaskList(scope, opts)
     | ["add", title, ...opts] -> runTaskAdd(scope, title, opts)
     | ["update", taskId, ...opts] -> runTaskUpdate(scope, taskId, opts)
-    | ["done", taskId, ..._opts] -> runTaskDone(scope, taskId)
-    | ["remove", taskId, ..._opts] -> runTaskRemove(scope, taskId)
+    | ["set-status", taskId, statusRaw] -> runTaskUpdate(scope, taskId, ["--status", statusRaw])
+    | ["remove", taskId] -> runTaskRemove(scope, taskId)
     | _ ->
         errLine("Error: invalid tasks command");
-        line("Usage: base tasks <list|add|update|done|remove> ...");
+        line("Usage: base tasks <list|add|update|set-status|remove> ...");
 
         exit(1)
 }
@@ -208,7 +205,6 @@ fun runTaskUpdate(scope: Scope, taskId: String, opts: List String): Unit effects
   let tagsOpt = mapOption(findOptionValue(opts, "-t", "--tags"), parseTagsCsv);
   let statusRawOpt = findOptionValue(opts, "--status", "--status");
   let statusOpt = normalizeStatusOption(statusRawOpt);
-
   match statusOpt with:
     | Result.Err e -> fail(e)
     | Result.Ok normalizedStatus -> {
@@ -232,23 +228,6 @@ fun runTaskUpdate(scope: Scope, taskId: String, opts: List String): Unit effects
     }
 }
 
-fun normalizeStatusOption(statusRawOpt: Option String): Result String (Option String) {
-  match statusRawOpt with:
-    | Option.None -> Result.Ok(Option.None)
-    | Option.Some raw -> match normalizeStatus(raw) with:
-      | Option.None -> Result.Err(`Invalid status: ${raw}. Use todo | in_progress | done`)
-      | Option.Some status -> Result.Ok(Option.Some(status))
-}
-
-fun runTaskDone(scope: Scope, taskId: String): Unit effects { IO } {
-  match markTaskDone(scope, taskId) with:
-    | Result.Err e -> fail(e)
-    | Result.Ok task ->
-        line("Task completed:");
-
-        printTask(task)
-}
-
 fun runTaskRemove(scope: Scope, taskId: String): Unit effects { IO } {
   match removeTask(scope, taskId) with:
     | Result.Err e -> fail(e)
@@ -267,21 +246,32 @@ fun runPlan(scope: Scope, rest: List String): Unit effects { IO } {
     | Result.Ok _ -> ()
 }
 
+fun runTags(scope: Scope, rest: List String): Unit effects { IO } {
+  requireReady(scope);
+  match runTagsCommand(scope, rest) with:
+    | Result.Err e -> if e == tagsUsage():
+      errLine("Error: invalid tags command");
+      line(tagsUsage());
+      exit(1)
+    else:
+      fail(e)
+    | Result.Ok _ -> ()
+}
+
 fun runRoadmap(scope: Scope, rest: List String): Unit effects { IO } {
   requireReady(scope);
 
   match rest with:
     | [] -> runRoadmapList(scope)
-    | ["list", ..._opts] -> runRoadmapList(scope)
+    | ["list"] -> runRoadmapList(scope)
     | ["add", goal, ...opts] -> runRoadmapAdd(scope, goal, opts)
     | ["update", itemId, ...opts] -> runRoadmapUpdate(scope, itemId, opts)
-    | ["move", itemId, positionText, ..._opts] -> runRoadmapMove(scope, itemId, positionText)
-    | ["active", itemId, ..._opts] -> runRoadmapActive(scope, itemId)
-    | ["done", itemId, ..._opts] -> runRoadmapDone(scope, itemId)
-    | ["remove", itemId, ..._opts] -> runRoadmapRemove(scope, itemId)
+    | ["set-status", itemId, statusRaw] -> runRoadmapUpdate(scope, itemId, ["--status", statusRaw])
+    | ["move", itemId, positionText] -> runRoadmapMove(scope, itemId, positionText)
+    | ["remove", itemId] -> runRoadmapRemove(scope, itemId)
     | _ ->
         errLine("Error: invalid roadmap command");
-        line("Usage: base roadmap <list|add|update|move|active|done|remove> ...");
+        line("Usage: base roadmap <list|add|update|set-status|move|remove> ...");
 
         exit(1)
 }
@@ -339,34 +329,10 @@ fun runRoadmapMove(scope: Scope, itemId: String, positionText: String): Unit eff
         printRoadmapList(items, "Roadmap goals")
 }
 
-fun runRoadmapActive(scope: Scope, itemId: String): Unit effects { IO } {
-  match markRoadmapActive(scope, itemId) with:
-    | Result.Err e -> fail(e)
-    | Result.Ok item ->
-        line("Roadmap goal marked active:");
-        printRoadmapItem(item)
-}
-
-fun runRoadmapDone(scope: Scope, itemId: String): Unit effects { IO } {
-  match markRoadmapDone(scope, itemId) with:
-    | Result.Err e -> fail(e)
-    | Result.Ok item ->
-        line("Roadmap goal completed:");
-        printRoadmapItem(item)
-}
-
 fun runRoadmapRemove(scope: Scope, itemId: String): Unit effects { IO } {
   match removeRoadmapItem(scope, itemId) with:
     | Result.Err e -> fail(e)
     | Result.Ok _ -> line(`Removed roadmap goal ${itemId}`)
-}
-
-fun normalizeRoadmapStatusOption(statusRawOpt: Option String): Result String (Option String) {
-  match statusRawOpt with:
-    | Option.None -> Result.Ok(Option.None)
-    | Option.Some raw -> match normalizeRoadmapStatus(raw) with:
-      | Option.None -> Result.Err(`Invalid roadmap status: ${raw}. Use planned | active | done`)
-      | Option.Some status -> Result.Ok(Option.Some(status))
 }
 
 fun runDocs(scope: Scope, rest: List String): Unit effects { IO } {
@@ -374,11 +340,11 @@ fun runDocs(scope: Scope, rest: List String): Unit effects { IO } {
 
   match rest with:
     | [] -> runDocList(scope)
-    | ["list", ..._opts] -> runDocList(scope)
-    | ["show", name, ..._opts] -> runDocShow(scope, name)
+    | ["list"] -> runDocList(scope)
+    | ["show", name] -> runDocShow(scope, name)
     | ["add", name, ...opts] -> runDocAdd(scope, name, opts)
     | ["update", name, ...opts] -> runDocUpdate(scope, name, opts)
-    | ["remove", name, ..._opts] -> runDocRemove(scope, name)
+    | ["remove", name] -> runDocRemove(scope, name)
     | ["search", query, ...opts] -> runDocSearch(scope, query, opts)
     | _ ->
         errLine("Error: invalid docs command");
@@ -431,13 +397,16 @@ fun runDocRemove(scope: Scope, name: String): Unit effects { IO } {
 
 fun runDocSearch(scope: Scope, query: String, opts: List String): Unit effects { IO } {
   requireReady(scope);
-
-  let rawLimit = getOrElse(findOptionValue(opts, "-l", "--limit"), "5");
-  let limit = max(1, parseIntOr(rawLimit, 5));
-
-  match searchDocs(scope, query, limit) with:
+  match runDocSearchCommand(scope, query, opts) with:
     | Result.Err e -> fail(e)
-    | Result.Ok results -> printDocSearch(results)
+    | Result.Ok _ -> ()
+}
+
+fun runSearch(scope: Scope, query: String, opts: List String): Unit effects { IO } {
+  requireReady(scope);
+  match runGlobalSearchCommand(scope, query, opts) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ()
 }
 
 fun resolveDocContent(opts: List String, required: Bool): Result String String effects { IO } {
@@ -570,26 +539,6 @@ fun printDocListItems(docs: List String): Unit effects { IO } {
         line(`  - ${doc}`);
 
         printDocListItems(rest)
-      }
-}
-
-fun printDocSearch(results: List DocSearchResult): Unit effects { IO } {
-  match results with:
-    | [] -> line("No docs matched your query.")
-    | _ -> printDocSearchItems(results, 1)
-}
-
-fun printDocSearchItems(results: List DocSearchResult, index: Int): Unit effects { IO } {
-  match results with:
-    | [] -> ()
-    | [result, ...rest] -> {
-        let rank = show(index);
-        let scoreText = show(result.score);
-
-        line(`${rank}. ${result.name} (score: ${scoreText})`);
-        line(`   ${result.excerpt}`);
-
-        printDocSearchItems(rest, index + 1)
       }
 }
 

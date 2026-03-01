@@ -4,6 +4,7 @@ from @std/String import { trim }
 from @std/Time import { date }
 from "./Models" import { Scope, Task, TaskPatch }
 from "./Store" import { loadTasks, saveTasks }
+from "./Tags" import { ensureGlobalTags }
 
 @public
 fun listTasks(scope: Scope, includeDone: Bool): Result String (List Task) effects { IO } {
@@ -38,31 +39,67 @@ fun addTask(
   if title == "":
     Result.Err("Task title cannot be empty")
   else:
-    match loadTasks(scope) with:
+    match ensureGlobalTags(scope, tags) with:
       | Result.Err e -> Result.Err(e)
-      | Result.Ok tasks ->
-          let now = date();
-          let nextTask: Task = {
-            id: randomUUID(),
-            title,
-            description: trim(descriptionRaw),
-            status: "todo",
-            tags,
-            createdAt: now,
-            updatedAt: now,
-          };
-          let nextTasks = tasks & [nextTask];
+      | Result.Ok normalizedTags -> addTaskWithTags(scope, title, trim(descriptionRaw), normalizedTags)
+}
 
-          match saveTasks(scope, nextTasks) with:
-            | Result.Err e -> Result.Err(e)
-            | Result.Ok _ -> Result.Ok(nextTask)
+fun addTaskWithTags(
+  scope: Scope,
+  title: String,
+  description: String,
+  tags: List String
+): Result String Task effects { IO } {
+  match loadTasks(scope) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok tasks -> addTaskWithLoadedTasks(scope, tasks, title, description, tags)
+}
+
+fun addTaskWithLoadedTasks(
+  scope: Scope,
+  tasks: List Task,
+  title: String,
+  description: String,
+  tags: List String
+): Result String Task effects { IO } {
+  let now = date();
+  let nextTask: Task = {
+    id: randomUUID(),
+    title,
+    description,
+    status: "todo",
+    tags,
+    createdAt: now,
+    updatedAt: now,
+  };
+  let nextTasks = tasks & [nextTask];
+
+  match saveTasks(scope, nextTasks) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok _ -> Result.Ok(nextTask)
 }
 
 @public
 fun updateTask(scope: Scope, taskId: String, patch: TaskPatch): Result String Task effects { IO } {
-  match loadTasks(scope) with:
+  match resolveTaskPatch(scope, patch) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok tasks -> updateWithTasks(scope, tasks, taskId, patch)
+    | Result.Ok resolvedPatch -> match loadTasks(scope) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok tasks -> updateWithTasks(scope, tasks, taskId, resolvedPatch)
+}
+
+fun resolveTaskPatch(scope: Scope, patch: TaskPatch): Result String TaskPatch effects { IO } {
+  match patch.tags with:
+    | Option.None -> Result.Ok(patch)
+    | Option.Some nextTags -> match ensureGlobalTags(scope, nextTags) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok normalizedTags ->
+          let resolved: TaskPatch = {
+            ...patch,
+            tags: Option.Some(normalizedTags),
+          };
+
+          Result.Ok(resolved)
 }
 
 fun updateWithTasks(

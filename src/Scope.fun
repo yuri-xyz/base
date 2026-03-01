@@ -33,6 +33,7 @@ fun resolveScope(useGlobal: Bool): Scope effects { IO } {
     projectDir,
     metaPath: join(projectDir, "meta.json"),
     tasksPath: join(projectDir, "tasks.json"),
+    tagsPath: join(projectDir, "tags.json"),
     roadmapPath: join(projectDir, "roadmap.json"),
     plansPath: join(projectDir, "plans.json"),
     docsDir: join(projectDir, "docs"),

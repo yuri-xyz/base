@@ -89,7 +89,7 @@ base init
 base tasks list [--all]
 base tasks add "Ship CLI" -d "Implement core commands" -t cli,mvp
 base tasks update <taskId> --title "Refine UX" --status in_progress
-base tasks done <taskId>
+base tasks set-status <taskId> done
 base tasks remove <taskId>
 ```
 
@@ -99,14 +99,15 @@ base tasks remove <taskId>
 base plan list [--all]
 base plan create "Large refactor" -d "Break up API layer and data model"
 base plan show <planId>
+base plan set-status <planId> active
 base plan update <planId> --status active
 base plan add-item <planId> "Split services into modules" -d "One module per bounded context"
 base plan update-item <planId> <itemId> --status in_progress
-base plan progress-item <planId> <itemId>
-base plan done-item <planId> <itemId>
+base plan set-item-status <planId> <itemId> in_progress
+base plan set-item-status <planId> <itemId> done
 base plan move-item <planId> <itemId> 1
 base plan remove-item <planId> <itemId>
-base plan done <planId>
+base plan set-status <planId> done
 ```
 
 `plan` is for longer implementation plans (multi-step refactors/features). Each plan keeps ordered items with per-item status and completion timestamps.
@@ -116,9 +117,9 @@ base plan done <planId>
 ```bash
 base roadmap list
 base roadmap add "Ship team-wide workflow" -d "Define concrete milestone outcomes"
+base roadmap set-status <itemId> active
 base roadmap update <itemId> --goal "Refine workflow" --status active
-base roadmap active <itemId>
-base roadmap done <itemId>
+base roadmap set-status <itemId> done
 base roadmap move <itemId> <position>
 base roadmap remove <itemId>
 ```
@@ -135,12 +136,7 @@ base docs add roadmap -f ./ROADMAP.md
 base docs update architecture -f ./ARCHITECTURE.md
 base docs remove architecture
 base docs search "queue worker" -l 5
-```
-
-Alias:
-
-```bash
-base kb search "onboarding" -l 5
+base search "onboarding"
 ```
 
 ## Notes

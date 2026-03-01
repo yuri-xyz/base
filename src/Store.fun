@@ -36,6 +36,7 @@ fun initializeAfterProjectDir(scope: Scope): Result String Unit effects { IO } {
 fun writeInitialFiles(scope: Scope): Result String Unit effects { IO } {
   let now = date();
   let emptyTasks: List Task = [];
+  let emptyTags: List String = [];
   let emptyRoadmap: List RoadmapItem = [];
   let emptyPlans: List Plan = [];
   let meta: ProjectMeta = {
@@ -50,16 +51,28 @@ fun writeInitialFiles(scope: Scope): Result String Unit effects { IO } {
 
   match writeJson(scope.metaPath, meta) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok _ -> writeInitialTasks(scope, emptyTasks, emptyRoadmap, emptyPlans)
+    | Result.Ok _ -> writeInitialTasks(scope, emptyTasks, emptyTags, emptyRoadmap, emptyPlans)
 }
 
 fun writeInitialTasks(
   scope: Scope,
   emptyTasks: List Task,
+  emptyTags: List String,
   emptyRoadmap: List RoadmapItem,
   emptyPlans: List Plan
 ): Result String Unit effects { IO } {
   match writeJson(scope.tasksPath, emptyTasks) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok _ -> writeInitialTags(scope, emptyTags, emptyRoadmap, emptyPlans)
+}
+
+fun writeInitialTags(
+  scope: Scope,
+  emptyTags: List String,
+  emptyRoadmap: List RoadmapItem,
+  emptyPlans: List Plan
+): Result String Unit effects { IO } {
+  match writeJson(scope.tagsPath, emptyTags) with:
     | Result.Err e -> Result.Err(e)
     | Result.Ok _ -> writeInitialRoadmap(scope, emptyRoadmap, emptyPlans)
 }
@@ -119,6 +132,19 @@ fun loadRoadmap(scope: Scope): Result String (List RoadmapItem) effects { IO } {
 }
 
 @public
+fun loadTags(scope: Scope): Result String (List String) effects { IO } {
+  if !exists(scope.tagsPath):
+    Result.Ok([])
+  else:
+    match readFile(scope.tagsPath) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok raw ->
+          let parsed: Result String (List String) = parse(raw);
+
+          parsed
+}
+
+@public
 fun loadPlans(scope: Scope): Result String (List Plan) effects { IO } {
   if !exists(scope.plansPath):
     Result.Ok([])
@@ -134,6 +160,13 @@ fun loadPlans(scope: Scope): Result String (List Plan) effects { IO } {
 @public
 fun saveTasks(scope: Scope, tasks: List Task): Result String Unit effects { IO } {
   match writeJson(scope.tasksPath, tasks) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok _ -> touchMeta(scope)
+}
+
+@public
+fun saveTags(scope: Scope, tags: List String): Result String Unit effects { IO } {
+  match writeJson(scope.tagsPath, tags) with:
     | Result.Err e -> Result.Err(e)
     | Result.Ok _ -> touchMeta(scope)
 }

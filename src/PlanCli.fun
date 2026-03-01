@@ -7,13 +7,9 @@ from "./Plans" import {
   getPlan,
   createPlan,
   updatePlan,
-  markPlanActive,
-  markPlanDone,
   removePlan,
   addPlanItem,
   updatePlanItem,
-  markPlanItemDone,
-  markPlanItemInProgress,
   movePlanItem,
   removePlanItem
 }
@@ -25,23 +21,21 @@ fun runPlanCommand(scope: Scope, rest: List String): Result String Unit effects 
     | [] -> runPlanList(scope, [])
     | ["list", ...opts] -> runPlanList(scope, opts)
     | ["create", title, ...opts] -> runPlanCreate(scope, title, opts)
-    | ["show", planId, ..._opts] -> runPlanShow(scope, planId)
+    | ["show", planId] -> runPlanShow(scope, planId)
+    | ["set-status", planId, statusRaw] -> runPlanSetStatus(scope, planId, statusRaw)
     | ["update", planId, ...opts] -> runPlanUpdate(scope, planId, opts)
-    | ["active", planId, ..._opts] -> runPlanActive(scope, planId)
-    | ["done", planId, ..._opts] -> runPlanDone(scope, planId)
-    | ["remove", planId, ..._opts] -> runPlanRemove(scope, planId)
+    | ["remove", planId] -> runPlanRemove(scope, planId)
     | ["add-item", planId, title, ...opts] -> runPlanAddItem(scope, planId, title, opts)
     | ["update-item", planId, itemId, ...opts] -> runPlanUpdateItem(scope, planId, itemId, opts)
-    | ["progress-item", planId, itemId, ..._opts] -> runPlanProgressItem(scope, planId, itemId)
-    | ["done-item", planId, itemId, ..._opts] -> runPlanDoneItem(scope, planId, itemId)
-    | ["move-item", planId, itemId, positionText, ..._opts] -> runPlanMoveItem(scope, planId, itemId, positionText)
-    | ["remove-item", planId, itemId, ..._opts] -> runPlanRemoveItem(scope, planId, itemId)
+    | ["set-item-status", planId, itemId, statusRaw] -> runPlanSetItemStatus(scope, planId, itemId, statusRaw)
+    | ["move-item", planId, itemId, positionText] -> runPlanMoveItem(scope, planId, itemId, positionText)
+    | ["remove-item", planId, itemId] -> runPlanRemoveItem(scope, planId, itemId)
     | _ -> Result.Err(planUsage())
 }
 
 @public
 fun planUsage(): String {
-  "Usage: base plan <list|create|show|update|active|done|remove|add-item|update-item|progress-item|done-item|move-item|remove-item> ..."
+  "Usage: base plan <list|create|show|set-status|update|remove|add-item|update-item|set-item-status|move-item|remove-item> ..."
 }
 
 fun runPlanList(scope: Scope, opts: List String): Result String Unit effects { IO } {
@@ -99,22 +93,22 @@ fun runPlanUpdate(scope: Scope, planId: String, opts: List String): Result Strin
             Result.Ok(())
 }
 
-fun runPlanActive(scope: Scope, planId: String): Result String Unit effects { IO } {
-  match markPlanActive(scope, planId) with:
+fun runPlanSetStatus(scope: Scope, planId: String, statusRaw: String): Result String Unit effects { IO } {
+  match normalizePlanStatusOption(Option.Some(statusRaw)) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plan ->
-        line("Plan marked active:");
-        printPlan(plan);
-        Result.Ok(())
-}
+    | Result.Ok statusOpt ->
+        let patch: PlanPatch = {
+          title: Option.None,
+          description: Option.None,
+          status: statusOpt,
+        };
 
-fun runPlanDone(scope: Scope, planId: String): Result String Unit effects { IO } {
-  match markPlanDone(scope, planId) with:
-    | Result.Err e -> Result.Err(e)
-    | Result.Ok plan ->
-        line("Plan completed:");
-        printPlan(plan);
-        Result.Ok(())
+        match updatePlan(scope, planId, patch) with:
+          | Result.Err e -> Result.Err(e)
+          | Result.Ok plan ->
+              line("Plan updated:");
+              printPlan(plan);
+              Result.Ok(())
 }
 
 fun runPlanRemove(scope: Scope, planId: String): Result String Unit effects { IO } {
@@ -171,22 +165,27 @@ fun runPlanUpdateItem(
             Result.Ok(())
 }
 
-fun runPlanProgressItem(scope: Scope, planId: String, itemId: String): Result String Unit effects { IO } {
-  match markPlanItemInProgress(scope, planId, itemId) with:
+fun runPlanSetItemStatus(
+  scope: Scope,
+  planId: String,
+  itemId: String,
+  statusRaw: String
+): Result String Unit effects { IO } {
+  match normalizePlanItemStatusOption(Option.Some(statusRaw)) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok item ->
-        line("Plan item marked in progress:");
-        printPlanItem(item);
-        Result.Ok(())
-}
+    | Result.Ok statusOpt ->
+        let patch: PlanItemPatch = {
+          title: Option.None,
+          description: Option.None,
+          status: statusOpt,
+        };
 
-fun runPlanDoneItem(scope: Scope, planId: String, itemId: String): Result String Unit effects { IO } {
-  match markPlanItemDone(scope, planId, itemId) with:
-    | Result.Err e -> Result.Err(e)
-    | Result.Ok item ->
-        line("Plan item completed:");
-        printPlanItem(item);
-        Result.Ok(())
+        match updatePlanItem(scope, planId, itemId, patch) with:
+          | Result.Err e -> Result.Err(e)
+          | Result.Ok item ->
+              line("Plan item updated:");
+              printPlanItem(item);
+              Result.Ok(())
 }
 
 fun runPlanMoveItem(

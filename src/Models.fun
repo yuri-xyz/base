@@ -11,6 +11,7 @@ type alias Scope = {
   projectDir: String,
   metaPath: String,
   tasksPath: String,
+  tagsPath: String,
   roadmapPath: String,
   plansPath: String,
   docsDir: String
