@@ -1,0 +1,11 @@
+{
+  "name": "base",
+  "src": "src",
+  "scripts": {
+    "base": "src/main.fun",
+    "link": "src/scripts/Link.fun"
+  },
+  "dependencies": {
+    "github:yuri-xyz/funktion/packages/stdlib": "master"
+  }
+}

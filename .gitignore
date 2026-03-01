@@ -1,0 +1,6 @@
+.DS_Store
+.funk_modules
+.funktion
+.build
+dist
+src/**/.funk-run-*
