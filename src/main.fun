@@ -62,7 +62,7 @@ fun printHelp(): Unit effects { IO } {
   line("  base");
   line("  base init");
   line("  base tasks list [--all]");
-  line("  base tasks add <title> [-d|--description <text>] [-t|--tags <csv>]");
+  line("  base tasks add <title> [-d|--description <text>] [-t|--tags <csv>] [--id <key>]");
   line(
     "  base tasks update <taskId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>] [-t|--tags <csv>]",
   );
@@ -73,14 +73,14 @@ fun printHelp(): Unit effects { IO } {
   line("  base tags remove <tag>");
   line("  base tags rename <from> <to>");
   line("  base plan list [--all]");
-  line("  base plan create <title> [-d|--description <text>]");
+  line("  base plan create <title> [-d|--description <text>] [--id <key>]");
   line("  base plan show <planId>");
   line("  base plan set-status <planId> <planned|active|done>");
   line(
     "  base plan update <planId> [--title <text>] [-d|--description <text>] [--status <planned|active|done>]",
   );
   line("  base plan remove <planId>");
-  line("  base plan add-item <planId> <title> [-d|--description <text>]");
+  line("  base plan add-item <planId> <title> [-d|--description <text>] [--id <key>]");
   line(
     "  base plan update-item <planId> <itemId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>]",
   );
@@ -88,7 +88,7 @@ fun printHelp(): Unit effects { IO } {
   line("  base plan move-item <planId> <itemId> <position>");
   line("  base plan remove-item <planId> <itemId>");
   line("  base roadmap list");
-  line("  base roadmap add <goal> [-d|--description <text>]");
+  line("  base roadmap add <goal> [-d|--description <text>] [--id <key>]");
   line(
     "  base roadmap update <itemId> [--goal <text>] [-d|--description <text>] [--status <planned|active|done>]",
   );
@@ -190,8 +190,9 @@ fun runTaskAdd(scope: Scope, title: String, opts: List String): Unit effects { I
   let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
   let tagsRaw = getOrElse(findOptionValue(opts, "-t", "--tags"), "");
   let tags = parseTagsCsv(tagsRaw);
+  let idKeyOpt = findOptionValue(opts, "--id", "--id");
 
-  match addTask(scope, title, description, tags) with:
+  match addTask(scope, title, description, tags, idKeyOpt) with:
     | Result.Err e -> fail(e)
     | Result.Ok task ->
         line("Task created:");
@@ -284,8 +285,9 @@ fun runRoadmapList(scope: Scope): Unit effects { IO } {
 
 fun runRoadmapAdd(scope: Scope, goal: String, opts: List String): Unit effects { IO } {
   let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
+  let idKeyOpt = findOptionValue(opts, "--id", "--id");
 
-  match addRoadmapItem(scope, goal, description) with:
+  match addRoadmapItem(scope, goal, description, idKeyOpt) with:
     | Result.Err e -> fail(e)
     | Result.Ok item ->
         line("Roadmap goal created:");

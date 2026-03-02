@@ -51,8 +51,9 @@ fun runPlanList(scope: Scope, opts: List String): Result String Unit effects { I
 
 fun runPlanCreate(scope: Scope, title: String, opts: List String): Result String Unit effects { IO } {
   let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
+  let idKeyOpt = findOptionValue(opts, "--id", "--id");
 
-  match createPlan(scope, title, description) with:
+  match createPlan(scope, title, description, idKeyOpt) with:
     | Result.Err e -> Result.Err(e)
     | Result.Ok plan ->
         line("Plan created:");
@@ -126,8 +127,9 @@ fun runPlanAddItem(
   opts: List String
 ): Result String Unit effects { IO } {
   let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
+  let idKeyOpt = findOptionValue(opts, "--id", "--id");
 
-  match addPlanItem(scope, planId, title, description) with:
+  match addPlanItem(scope, planId, title, description, idKeyOpt) with:
     | Result.Err e -> Result.Err(e)
     | Result.Ok item ->
         line("Plan item created:");

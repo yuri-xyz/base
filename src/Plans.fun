@@ -1,9 +1,9 @@
-from @std/Crypto import { randomUUID }
-from @std/List import { filter, sort, length }
+from @std/List import { filter, sort, length, map }
 from @std/String import { trim }
 from @std/Time import { date }
 from "./Models" import { Scope, Plan, PlanPatch, PlanItem, PlanItemPatch }
 from "./Store" import { loadPlans, savePlans }
+from "./Util" import { nextGeneratedId, resolveEntityIdReference, resolveIdKey }
 
 @public
 fun listPlans(scope: Scope, includeDone: Bool): Result String (List Plan) effects { IO } {
@@ -19,7 +19,9 @@ fun listPlans(scope: Scope, includeDone: Bool): Result String (List Plan) effect
 fun getPlan(scope: Scope, planId: String): Result String Plan effects { IO } {
   match loadPlans(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plans -> findPlan(plans, planId)
+    | Result.Ok plans -> match resolvePlanId(plans, planId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedPlanId -> findPlan(plans, resolvedPlanId)
 }
 
 fun findPlan(plans: List Plan, planId: String): Result String Plan {
@@ -32,27 +34,36 @@ fun findPlan(plans: List Plan, planId: String): Result String Plan {
 }
 
 @public
-fun createPlan(scope: Scope, titleRaw: String, descriptionRaw: String): Result String Plan effects { IO } {
+fun createPlan(
+  scope: Scope,
+  titleRaw: String,
+  descriptionRaw: String,
+  idKeyRawOpt: Option String
+): Result String Plan effects { IO } {
   let title = trim(titleRaw);
   let description = trim(descriptionRaw);
 
   if title == "":
     Result.Err("Plan title cannot be empty")
   else:
+    let idKey = resolveIdKey(idKeyRawOpt, title);
+
     match loadPlans(scope) with:
       | Result.Err e -> Result.Err(e)
-      | Result.Ok plans -> createLoadedPlan(scope, plans, title, description)
+      | Result.Ok plans -> createLoadedPlan(scope, plans, title, description, idKey)
 }
 
 fun createLoadedPlan(
   scope: Scope,
   plans: List Plan,
   title: String,
-  description: String
+  description: String,
+  idKey: String
 ): Result String Plan effects { IO } {
   let now = date();
+  let nextId = nextGeneratedId(map(plans, (plan) => { plan.id }), idKey);
   let next: Plan = {
-    id: randomUUID(),
+    id: nextId,
     title,
     description,
     status: "planned",
@@ -71,7 +82,9 @@ fun createLoadedPlan(
 fun updatePlan(scope: Scope, planId: String, patch: PlanPatch): Result String Plan effects { IO } {
   match loadPlans(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plans -> updateLoadedPlan(scope, plans, planId, patch)
+    | Result.Ok plans -> match resolvePlanId(plans, planId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedPlanId -> updateLoadedPlan(scope, plans, resolvedPlanId, patch)
 }
 
 fun updateLoadedPlan(
@@ -136,37 +149,35 @@ fun resolvePlanCompletedAt(current: Option String, status: String): Option Strin
 
 @public
 fun markPlanActive(scope: Scope, planId: String): Result String Plan effects { IO } {
-  let patch: PlanPatch = {
-    title: Option.None,
-    description: Option.None,
-    status: Option.Some("active"),
-  };
-
-  updatePlan(scope, planId, patch)
+  updatePlan(scope, planId, planStatusPatch("active"))
 }
 
 @public
 fun markPlanDone(scope: Scope, planId: String): Result String Plan effects { IO } {
-  let patch: PlanPatch = {
+  updatePlan(scope, planId, planStatusPatch("done"))
+}
+
+fun planStatusPatch(status: String): PlanPatch {
+  {
     title: Option.None,
     description: Option.None,
-    status: Option.Some("done"),
-  };
-
-  updatePlan(scope, planId, patch)
+    status: Option.Some(status),
+  }
 }
 
 @public
 fun removePlan(scope: Scope, planId: String): Result String Unit effects { IO } {
   match loadPlans(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plans ->
-        let remaining = filter(plans, (plan) => { plan.id != planId });
+    | Result.Ok plans -> match resolvePlanId(plans, planId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedPlanId ->
+          let remaining = filter(plans, (plan) => { plan.id != resolvedPlanId });
 
-        if length(remaining) == length(plans):
-          Result.Err(`Plan not found: ${planId}`)
-        else:
-          savePlans(scope, remaining)
+          if length(remaining) == length(plans):
+            Result.Err(`Plan not found: ${planId}`)
+          else:
+            savePlans(scope, remaining)
 }
 
 @public
@@ -174,7 +185,8 @@ fun addPlanItem(
   scope: Scope,
   planId: String,
   titleRaw: String,
-  descriptionRaw: String
+  descriptionRaw: String,
+  idKeyRawOpt: Option String
 ): Result String PlanItem effects { IO } {
   let title = trim(titleRaw);
   let description = trim(descriptionRaw);
@@ -182,26 +194,32 @@ fun addPlanItem(
   if title == "":
     Result.Err("Plan item title cannot be empty")
   else:
+    let idKey = resolveIdKey(idKeyRawOpt, title);
+
     match loadPlans(scope) with:
       | Result.Err e -> Result.Err(e)
-      | Result.Ok plans -> addPlanItemInPlans(scope, plans, planId, title, description, [])
+      | Result.Ok plans -> match resolvePlanId(plans, planId) with:
+        | Result.Err e -> Result.Err(e)
+        | Result.Ok resolvedPlanId ->
+            addPlanItemInPlans(scope, plans, resolvedPlanId, (title, description, idKey), [])
 }
 
 fun addPlanItemInPlans(
   scope: Scope,
   plans: List Plan,
   planId: String,
-  title: String,
-  description: String,
+  draft: (String, String, String),
   acc: List Plan
 ): Result String PlanItem effects { IO } {
   match plans with:
     | [] -> Result.Err(`Plan not found: ${planId}`)
     | [plan, ...rest] -> if plan.id == planId: {
+      let (title, description, idKey) = draft;
       let orderedItems = sortPlanItemsByOrder(plan.items);
       let now = date();
+      let itemId = nextGeneratedId(map(orderedItems, (item) => { item.id }), idKey);
       let nextItem: PlanItem = {
-        id: randomUUID(),
+        id: itemId,
         title,
         description,
         status: "todo",
@@ -222,7 +240,7 @@ fun addPlanItemInPlans(
         | Result.Ok _ -> Result.Ok(nextItem)
     }
     else:
-      addPlanItemInPlans(scope, rest, planId, title, description, acc & [plan])
+      addPlanItemInPlans(scope, rest, planId, draft, acc & [plan])
 }
 
 @public
@@ -234,7 +252,9 @@ fun updatePlanItem(
 ): Result String PlanItem effects { IO } {
   match loadPlans(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plans -> updatePlanItemInPlans(scope, plans, planId, itemId, patch, [])
+    | Result.Ok plans -> match resolvePlanId(plans, planId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedPlanId -> updatePlanItemInPlans(scope, plans, resolvedPlanId, itemId, patch, [])
 }
 
 fun updatePlanItemInPlans(
@@ -261,10 +281,12 @@ fun updatePlanItemInPlan(
   patch: PlanItemPatch,
   acc: List Plan
 ): Result String PlanItem effects { IO } {
-  match patchPlanItem(plan.items, itemId, patch, []) with:
+  match resolvePlanItemId(plan.items, itemId) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok (updatedItem, nextItems) ->
-        persistUpdatedPlanItem(scope, plan, rest, acc, updatedItem, nextItems)
+    | Result.Ok resolvedItemId -> match patchPlanItem(plan.items, resolvedItemId, patch, []) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok (updatedItem, nextItems) ->
+          persistUpdatedPlanItem(scope, plan, rest, acc, updatedItem, nextItems)
 }
 
 fun persistUpdatedPlanItem(
@@ -335,13 +357,7 @@ fun resolvePlanItemCompletedAt(current: Option String, status: String): Option S
 
 @public
 fun markPlanItemDone(scope: Scope, planId: String, itemId: String): Result String PlanItem effects { IO } {
-  let patch: PlanItemPatch = {
-    title: Option.None,
-    description: Option.None,
-    status: Option.Some("done"),
-  };
-
-  updatePlanItem(scope, planId, itemId, patch)
+  updatePlanItem(scope, planId, itemId, planItemStatusPatch("done"))
 }
 
 @public
@@ -350,13 +366,15 @@ fun markPlanItemInProgress(
   planId: String,
   itemId: String
 ): Result String PlanItem effects { IO } {
-  let patch: PlanItemPatch = {
+  updatePlanItem(scope, planId, itemId, planItemStatusPatch("in_progress"))
+}
+
+fun planItemStatusPatch(status: String): PlanItemPatch {
+  {
     title: Option.None,
     description: Option.None,
-    status: Option.Some("in_progress"),
-  };
-
-  updatePlanItem(scope, planId, itemId, patch)
+    status: Option.Some(status),
+  }
 }
 
 @public
@@ -368,7 +386,10 @@ fun movePlanItem(
 ): Result String Plan effects { IO } {
   match loadPlans(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plans -> movePlanItemInPlans(scope, plans, planId, itemId, newPositionRaw, [])
+    | Result.Ok plans -> match resolvePlanId(plans, planId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedPlanId ->
+          movePlanItemInPlans(scope, plans, resolvedPlanId, itemId, newPositionRaw, [])
 }
 
 fun movePlanItemInPlans(
@@ -395,10 +416,12 @@ fun movePlanItemInPlan(
   newPositionRaw: Int,
   acc: List Plan
 ): Result String Plan effects { IO } {
-  match splitOutPlanItem(sortPlanItemsByOrder(plan.items), itemId, []) with:
+  match resolvePlanItemId(plan.items, itemId) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok (target, remaining) ->
-        persistMovedPlanItem(scope, plan, rest, acc, (target, remaining), newPositionRaw)
+    | Result.Ok resolvedItemId -> match splitOutPlanItem(sortPlanItemsByOrder(plan.items), resolvedItemId, []) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok (target, remaining) ->
+          persistMovedPlanItem(scope, plan, rest, acc, (target, remaining), newPositionRaw)
 }
 
 fun persistMovedPlanItem(
@@ -465,7 +488,9 @@ fun renumberPlanItems(items: List PlanItem, nextOrder: Int, acc: List PlanItem):
 fun removePlanItem(scope: Scope, planId: String, itemId: String): Result String Plan effects { IO } {
   match loadPlans(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plans -> removePlanItemInPlans(scope, plans, planId, itemId, [])
+    | Result.Ok plans -> match resolvePlanId(plans, planId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedPlanId -> removePlanItemInPlans(scope, plans, resolvedPlanId, itemId, [])
 }
 
 fun removePlanItemInPlans(
@@ -490,9 +515,11 @@ fun removePlanItemInPlan(
   itemId: String,
   acc: List Plan
 ): Result String Plan effects { IO } {
-  match removePlanItemById(sortPlanItemsByOrder(plan.items), itemId, []) with:
+  match resolvePlanItemId(plan.items, itemId) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok remaining -> persistRemovedPlanItem(scope, plan, rest, acc, remaining)
+    | Result.Ok resolvedItemId -> match removePlanItemById(sortPlanItemsByOrder(plan.items), resolvedItemId, []) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok remaining -> persistRemovedPlanItem(scope, plan, rest, acc, remaining)
 }
 
 fun persistRemovedPlanItem(
@@ -525,6 +552,14 @@ fun removePlanItemById(
       Result.Ok(acc & rest)
     else:
       removePlanItemById(rest, itemId, acc & [item])
+}
+
+fun resolvePlanId(plans: List Plan, planIdRaw: String): Result String String {
+  resolveEntityIdReference(map(plans, (plan) => { plan.id }), planIdRaw, "Plan")
+}
+
+fun resolvePlanItemId(items: List PlanItem, itemIdRaw: String): Result String String {
+  resolveEntityIdReference(map(items, (item) => { item.id }), itemIdRaw, "Plan item")
 }
 
 fun clampPosition(position: Int, maxPosition: Int): Int {

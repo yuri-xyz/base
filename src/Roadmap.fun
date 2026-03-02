@@ -1,9 +1,9 @@
-from @std/Crypto import { randomUUID }
 from @std/List import { sort, length }
 from @std/String import { trim }
 from @std/Time import { date }
 from "./Models" import { Scope, RoadmapItem, RoadmapPatch }
 from "./Store" import { loadRoadmap, saveRoadmap }
+from "./Util" import { nextGeneratedId, resolveEntityIdReference, resolveIdKey }
 
 @public
 fun listRoadmap(scope: Scope): Result String (List RoadmapItem) effects { IO } {
@@ -16,7 +16,8 @@ fun listRoadmap(scope: Scope): Result String (List RoadmapItem) effects { IO } {
 fun addRoadmapItem(
   scope: Scope,
   goalRaw: String,
-  descriptionRaw: String
+  descriptionRaw: String,
+  idKeyRawOpt: Option String
 ): Result String RoadmapItem effects { IO } {
   let goal = trim(goalRaw);
   let description = trim(descriptionRaw);
@@ -24,20 +25,24 @@ fun addRoadmapItem(
   if goal == "":
     Result.Err("Roadmap goal cannot be empty")
   else:
+    let idKey = resolveIdKey(idKeyRawOpt, goal);
+
     match loadRoadmap(scope) with:
       | Result.Err e -> Result.Err(e)
-      | Result.Ok items -> addLoadedRoadmapItem(scope, items, goal, description)
+      | Result.Ok items -> addLoadedRoadmapItem(scope, items, goal, description, idKey)
 }
 
 fun addLoadedRoadmapItem(
   scope: Scope,
   items: List RoadmapItem,
   goal: String,
-  description: String
+  description: String,
+  idKey: String
 ): Result String RoadmapItem effects { IO } {
   let now = date();
+  let nextId = nextGeneratedId(collectRoadmapIds(items, []), idKey);
   let next: RoadmapItem = {
-    id: randomUUID(),
+    id: nextId,
     goal,
     description,
     status: "planned",
@@ -62,7 +67,9 @@ fun updateRoadmapItem(
 ): Result String RoadmapItem effects { IO } {
   match loadRoadmap(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok items -> updateLoadedRoadmapItem(scope, items, itemId, patch)
+    | Result.Ok items -> match resolveRoadmapItemId(items, itemId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedItemId -> updateLoadedRoadmapItem(scope, items, resolvedItemId, patch)
 }
 
 fun updateLoadedRoadmapItem(
@@ -141,7 +148,9 @@ fun moveRoadmapItem(
 ): Result String (List RoadmapItem) effects { IO } {
   match loadRoadmap(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok items -> moveLoadedRoadmapItem(scope, items, itemId, newPositionRaw)
+    | Result.Ok items -> match resolveRoadmapItemId(items, itemId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedItemId -> moveLoadedRoadmapItem(scope, items, resolvedItemId, newPositionRaw)
 }
 
 fun moveLoadedRoadmapItem(
@@ -231,7 +240,9 @@ fun markRoadmapActive(scope: Scope, itemId: String): Result String RoadmapItem e
 fun removeRoadmapItem(scope: Scope, itemId: String): Result String Unit effects { IO } {
   match loadRoadmap(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok items -> removeLoadedRoadmapItem(scope, items, itemId)
+    | Result.Ok items -> match resolveRoadmapItemId(items, itemId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedItemId -> removeLoadedRoadmapItem(scope, items, resolvedItemId)
 }
 
 fun removeLoadedRoadmapItem(
@@ -259,6 +270,16 @@ fun removeById(
       Result.Ok(acc & rest)
     else:
       removeById(rest, itemId, acc & [item])
+}
+
+fun resolveRoadmapItemId(items: List RoadmapItem, itemIdRaw: String): Result String String {
+  resolveEntityIdReference(collectRoadmapIds(items, []), itemIdRaw, "Roadmap item")
+}
+
+fun collectRoadmapIds(items: List RoadmapItem, acc: List String): List String {
+  match items with:
+    | [] -> acc
+    | [item, ...rest] -> collectRoadmapIds(rest, acc & [item.id])
 }
 
 fun clampPosition(position: Int, maxPosition: Int): Int {

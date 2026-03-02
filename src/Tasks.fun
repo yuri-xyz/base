@@ -1,10 +1,10 @@
-from @std/Crypto import { randomUUID }
 from @std/List import { filter, sort, length }
 from @std/String import { trim }
 from @std/Time import { date }
 from "./Models" import { Scope, Task, TaskPatch }
 from "./Store" import { loadTasks, saveTasks }
 from "./Tags" import { ensureGlobalTags }
+from "./Util" import { nextGeneratedId, resolveEntityIdReference, resolveIdKey }
 
 @public
 fun listTasks(scope: Scope, includeDone: Bool): Result String (List Task) effects { IO } {
@@ -32,7 +32,8 @@ fun addTask(
   scope: Scope,
   titleRaw: String,
   descriptionRaw: String,
-  tags: List String
+  tags: List String,
+  idKeyRawOpt: Option String
 ): Result String Task effects { IO } {
   let title = trim(titleRaw);
 
@@ -41,18 +42,22 @@ fun addTask(
   else:
     match ensureGlobalTags(scope, tags) with:
       | Result.Err e -> Result.Err(e)
-      | Result.Ok normalizedTags -> addTaskWithTags(scope, title, trim(descriptionRaw), normalizedTags)
+      | Result.Ok normalizedTags ->
+          let idKey = resolveIdKey(idKeyRawOpt, title);
+
+          addTaskWithTags(scope, title, trim(descriptionRaw), normalizedTags, idKey)
 }
 
 fun addTaskWithTags(
   scope: Scope,
   title: String,
   description: String,
-  tags: List String
+  tags: List String,
+  idKey: String
 ): Result String Task effects { IO } {
   match loadTasks(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok tasks -> addTaskWithLoadedTasks(scope, tasks, title, description, tags)
+    | Result.Ok tasks -> addTaskWithLoadedTasks(scope, tasks, title, description, tags, idKey)
 }
 
 fun addTaskWithLoadedTasks(
@@ -60,11 +65,13 @@ fun addTaskWithLoadedTasks(
   tasks: List Task,
   title: String,
   description: String,
-  tags: List String
+  tags: List String,
+  idKey: String
 ): Result String Task effects { IO } {
   let now = date();
+  let nextId = nextGeneratedId(collectTaskIds(tasks, []), idKey);
   let nextTask: Task = {
-    id: randomUUID(),
+    id: nextId,
     title,
     description,
     status: "todo",
@@ -108,9 +115,11 @@ fun updateWithTasks(
   taskId: String,
   patch: TaskPatch
 ): Result String Task effects { IO } {
-  match applyTaskPatch(tasks, taskId, patch, []) with:
+  match resolveTaskId(tasks, taskId) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok (updated, nextTasks) -> persistUpdatedTask(scope, updated, nextTasks)
+    | Result.Ok resolvedTaskId -> match applyTaskPatch(tasks, resolvedTaskId, patch, []) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok (updated, nextTasks) -> persistUpdatedTask(scope, updated, nextTasks)
 }
 
 fun persistUpdatedTask(
@@ -172,11 +181,23 @@ fun markTaskDone(scope: Scope, taskId: String): Result String Task effects { IO 
 fun removeTask(scope: Scope, taskId: String): Result String Unit effects { IO } {
   match loadTasks(scope) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok tasks ->
-        let remaining = filter(tasks, (task) => { task.id != taskId });
+    | Result.Ok tasks -> match resolveTaskId(tasks, taskId) with:
+      | Result.Err e -> Result.Err(e)
+      | Result.Ok resolvedTaskId ->
+          let remaining = filter(tasks, (task) => { task.id != resolvedTaskId });
 
-        if length(remaining) == length(tasks):
-          Result.Err(`Task not found: ${taskId}`)
-        else:
-          saveTasks(scope, remaining)
+          if length(remaining) == length(tasks):
+            Result.Err(`Task not found: ${taskId}`)
+          else:
+            saveTasks(scope, remaining)
+}
+
+fun resolveTaskId(tasks: List Task, taskIdRaw: String): Result String String {
+  resolveEntityIdReference(collectTaskIds(tasks, []), taskIdRaw, "Task")
+}
+
+fun collectTaskIds(tasks: List Task, acc: List String): List String {
+  match tasks with:
+    | [] -> acc
+    | [task, ...rest] -> collectTaskIds(rest, acc & [task.id])
 }

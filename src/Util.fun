@@ -6,6 +6,7 @@ from @std/String import {
   toLowerCase,
   toChars,
   join,
+  parseIntOr,
   isEmpty,
   endsWith,
   startsWith,
@@ -79,6 +80,126 @@ fun slugify(raw: String): String {
   let candidate = trimDashes(join(compact, ""));
 
   if candidate == "": "project" else: candidate
+}
+
+@public
+fun nextGeneratedId(existingIds: List String, keyRaw: String): String {
+  let nextNumber = maxSeenSequence(existingIds, 0) + 1;
+  let slug = slugify(keyRaw);
+  let numberText = show(nextNumber);
+
+  `#${numberText}-${slug}`
+}
+
+@public
+fun resolveIdKey(idKeyRawOpt: Option String, fallback: String): String {
+  match idKeyRawOpt with:
+    | Option.None -> fallback
+    | Option.Some rawKey ->
+        let normalized = trim(rawKey);
+
+        if normalized == "":
+          fallback
+        else:
+          normalized
+}
+
+@public
+fun resolveEntityIdReference(
+  existingIds: List String,
+  providedIdRaw: String,
+  entityName: String
+): Result String String {
+  let providedId = trim(providedIdRaw);
+
+  if hasExactId(existingIds, providedId):
+    Result.Ok(providedId)
+  else:
+    match parseShortSequence(providedId) with:
+      | Option.None -> Result.Err(`${entityName} not found: ${providedIdRaw}`)
+      | Option.Some seq -> match collectBySequence(existingIds, seq, []) with:
+        | [] -> Result.Err(`${entityName} not found: ${providedIdRaw}`)
+        | [resolved] -> Result.Ok(resolved)
+        | matches ->
+            let label = toLowerCase(entityName);
+            let options = join(matches, ", ");
+
+            Result.Err(`Ambiguous ${label} id: ${providedId}. Matches: ${options}`)
+}
+
+fun maxSeenSequence(ids: List String, currentMax: Int): Int {
+  match ids with:
+    | [] -> currentMax
+    | [currentId, ...rest] -> match parseAnySequence(currentId) with:
+      | Option.None -> maxSeenSequence(rest, currentMax)
+      | Option.Some seq ->
+          let nextMax = if seq > currentMax: seq else: currentMax;
+
+          maxSeenSequence(rest, nextMax)
+}
+
+fun parseAnySequence(rawId: String): Option Int {
+  let value = trim(rawId);
+
+  if !startsWith(value, "#"):
+    Option.None
+  else:
+    let withoutHash = sliceFrom(value, 1);
+
+    match split(withoutHash, "-") with:
+      | [] -> Option.None
+      | [head, ..._tail] -> parseDigitsToInt(head)
+}
+
+fun parseShortSequence(rawId: String): Option Int {
+  let value = trim(rawId);
+
+  if !startsWith(value, "#") or contains(value, "-"):
+    Option.None
+  else:
+    parseDigitsToInt(sliceFrom(value, 1))
+}
+
+fun parseDigitsToInt(rawDigits: String): Option Int {
+  let digits = trim(rawDigits);
+
+  if isDigits(digits):
+    Option.Some(parseIntOr(digits, 0))
+  else:
+    Option.None
+}
+
+fun isDigits(value: String): Bool {
+  value != "" and areAllDigits(toChars(value))
+}
+
+fun areAllDigits(chars: List String): Bool {
+  match chars with:
+    | [] -> true
+    | [ch, ...rest] -> if ch >= "0" and ch <= "9":
+      areAllDigits(rest)
+    else:
+      false
+}
+
+fun hasExactId(ids: List String, candidate: String): Bool {
+  match ids with:
+    | [] -> false
+    | [currentId, ...rest] -> if currentId == candidate:
+      true
+    else:
+      hasExactId(rest, candidate)
+}
+
+fun collectBySequence(ids: List String, seq: Int, acc: List String): List String {
+  match ids with:
+    | [] -> acc
+    | [currentId, ...rest] -> match parseAnySequence(currentId) with:
+      | Option.None -> collectBySequence(rest, seq, acc)
+      | Option.Some current -> if current == seq:
+        collectBySequence(rest, seq, acc & [currentId])
+      else:
+        collectBySequence(rest, seq, acc)
 }
 
 fun collapseDashes(chars: List String, lastWasDash: Bool, acc: List String): List String {
