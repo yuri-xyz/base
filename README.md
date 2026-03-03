@@ -1,178 +1,305 @@
-# base (Funktion-native)
+# base
 
-`base` is a Funktion CLI for project-scoped tasks and docs.
+`base` is a Funktion-native CLI for managing project-scoped work:
 
-It detects the Git repository root from your current directory (including subfolders) and stores all data in:
+- tasks
+- plans (with ordered items)
+- roadmap goals
+- project docs (plus fuzzy search)
 
-- default: `<repo-root>/.base`
-- global mode (`--global`): `~/.base/projects/<repo-name>-<hash>`
-- global override: `BASE_HOME=/custom/path base --global ...`
+It auto-detects your Git repo root and stores data in repo-local or global scope.
 
-By default, data is local to the repository via `.base/` at repo root.
+## Quick Links
 
-## Setup
+- [Why base](#why-base)
+- [Installation and Run](#installation-and-run)
+- [Quickstart](#quickstart)
+- [Storage and Scope](#storage-and-scope)
+- [Command Reference](#command-reference)
+- [IDs and Status Values](#ids-and-status-values)
+- [Bastion Auto-Ingest](#bastion-auto-ingest)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
 
-This project depends on stdlib from:
+## Why base
 
-- `github:yuri-xyz/funktion/packages/stdlib@master`
+- Git-scoped by default: state lives with the repo in `.base/`
+- Fast local workflow: no SaaS, no remote dependency
+- Structured planning: plans, plan items, roadmap ordering, statuses
+- Built-in knowledge base: markdown docs with fuzzy search
+- Flexible scope: switch to global storage with `--global`
 
-Verify dependencies:
+## Installation and Run
+
+### Prerequisites
+
+- [Funktion CLI](https://github.com/yuri-xyz/funktion) installed
+- Git available in your shell
+
+### Verify dependencies
 
 ```bash
 funk deps
 ```
 
-## Run
-
-Use `funk run` directly:
+### Run without installing a global binary
 
 ```bash
-funk run src/main.fun
-funk run src/main.fun -- init
+funk run src/main.fun -- help
 ```
 
-Or via script alias in `fun.json`:
+Or use the project script alias:
 
 ```bash
-funk script base
-funk script base -- init
-funk script base -- tasks list
+funk script base -- help
 ```
 
-## Global Link Script
-
-Use the Funktion project script:
+### Install a global `base` launcher
 
 ```bash
 funk script link
 ```
 
-What it does:
-
-- installs a global launcher command named `base` that runs `src/main.fun` via `funk run`
-
-Launcher location:
+This installs `base` at:
 
 - default: `~/.local/bin/base`
 - override: `BASE_BIN_DIR=/custom/bin funk script link`
 
-If needed, add the bin directory to your `PATH`.
+## Quickstart
 
-## Commands
+```bash
+# 1) initialize project storage
+base init
 
-### Overview
+# 2) add task + roadmap + plan
+base tasks add "Ship CLI docs rewrite" -d "Replace README with command-accurate guide" -t docs,cli
+base roadmap add "Polish CLI UX" -d "Improve help, output clarity, docs"
+base plan create "Release prep" -d "Track final improvements"
+
+# 3) add plan item
+base plan add-item #1 "Finalize README" -d "End-to-end command reference"
+
+# 4) add a project note
+base docs add architecture -c "# Architecture\n\nCore modules and responsibilities."
+
+# 5) search everything
+base search "readme"
+```
+
+## Storage and Scope
+
+`base` supports two storage modes:
+
+- local (default): `<repo-root>/.base`
+- global (`--global`): `<BASE_HOME|~/.base>/projects/<project-key>`
+
+`BASE_HOME` overrides the storage root in both modes.
+
+Examples:
+
+```bash
+base tasks list
+base --global tasks list
+BASE_HOME=/tmp/base-data base --global tasks list
+```
+
+`project-key` is derived from repo identity (slugged repo name + source hash), so global projects stay distinct even with similar names.
+
+### Data layout
+
+After `base init`, the project directory contains:
+
+- `meta.json`
+- `tasks.json`
+- `tags.json`
+- `roadmap.json`
+- `plans.json`
+- `docs/*.md`
+
+## Command Reference
+
+Use `--global` with any command.
+
+```bash
+base --global <command> ...
+```
+
+### Overview and init
 
 ```bash
 base
-# (or: funk run src/main.fun)
-```
-
-Shows scope, pending tasks, roadmap goals, and docs.
-
-Use global store mode for any command by adding `--global`:
-
-```bash
-base --global
-base --global init
-base --global plan list
-```
-
-### Initialization
-
-```bash
 base init
+base help
 ```
+
+- `base` shows scope, pending tasks, roadmap goals, and docs.
+- Most subcommands require initialization first (`base init`).
 
 ### Tasks
 
 ```bash
 base tasks list [--all]
-base tasks add "Ship CLI" -d "Implement core commands" -t cli,mvp
-base tasks update <taskId> --title "Refine UX" --status in_progress
-base tasks set-status <taskId> done
+base tasks add <title> [-d|--description <text>] [-t|--tags <csv>] [--id <key>]
+base tasks update <taskId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>] [-t|--tags <csv>]
+base tasks set-status <taskId> <todo|in_progress|done>
 base tasks remove <taskId>
 ```
+
+Notes:
+
+- `list` hides done tasks unless `--all` is used.
+- tags are normalized to lowercase and deduplicated.
+
+### Tags
+
+```bash
+base tags list
+base tags add <tag>
+base tags remove <tag>
+base tags rename <from> <to>
+```
+
+Notes:
+
+- tag rename/remove also updates task tag assignments.
 
 ### Plans
 
 ```bash
 base plan list [--all]
-base plan create "Large refactor" -d "Break up API layer and data model"
+base plan create <title> [-d|--description <text>] [--id <key>]
 base plan show <planId>
-base plan set-status <planId> active
-base plan update <planId> --status active
-base plan add-item <planId> "Split services into modules" -d "One module per bounded context"
-base plan update-item <planId> <itemId> --status in_progress
-base plan set-item-status <planId> <itemId> in_progress
-base plan set-item-status <planId> <itemId> done
-base plan move-item <planId> <itemId> 1
+base plan set-status <planId> <planned|active|done>
+base plan update <planId> [--title <text>] [-d|--description <text>] [--status <planned|active|done>]
+base plan remove <planId>
+base plan add-item <planId> <title> [-d|--description <text>] [--id <key>]
+base plan update-item <planId> <itemId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>]
+base plan set-item-status <planId> <itemId> <todo|in_progress|done>
+base plan move-item <planId> <itemId> <position>
 base plan remove-item <planId> <itemId>
-base plan set-status <planId> done
 ```
 
-`plan` is for longer implementation plans (multi-step refactors/features). Each plan keeps ordered items with per-item status and completion timestamps.
+Notes:
+
+- plan items are ordered and renumbered when moved/removed.
+- completed plans/items retain completion timestamps.
 
 ### Roadmap
 
 ```bash
 base roadmap list
-base roadmap add "Ship team-wide workflow" -d "Define concrete milestone outcomes"
-base roadmap set-status <itemId> active
-base roadmap update <itemId> --goal "Refine workflow" --status active
-base roadmap set-status <itemId> done
+base roadmap add <goal> [-d|--description <text>] [--id <key>]
+base roadmap update <itemId> [--goal <text>] [-d|--description <text>] [--status <planned|active|done>]
+base roadmap set-status <itemId> <planned|active|done>
 base roadmap move <itemId> <position>
 base roadmap remove <itemId>
 ```
 
-`roadmap` is meant for ordered, conceptual goals. Completed goals stay visible in `roadmap list` with their completion timestamp.
+Notes:
 
-### Docs / Knowledge Base
+- roadmap goals are always ordered.
+- completion timestamps are set/cleared based on status transitions.
+
+### Docs
 
 ```bash
 base docs list
-base docs show architecture
-base docs add architecture -c "# Architecture"
-base docs add roadmap -f ./ROADMAP.md
-base docs update architecture -f ./ARCHITECTURE.md
-base docs remove architecture
-base docs search "queue worker" -l 5
-base search "onboarding"
+base docs show <name>
+base docs add <name> [-c|--content <text>] [-f|--file <path>]
+base docs update <name> [-c|--content <text>] [-f|--file <path>]
+base docs remove <name>
+base docs search <query> [-l|--limit <n>]
 ```
 
-## Notes
+Notes:
 
-- `init` is required before task/doc commands.
-- Doc search uses a built-in fuzzy score (name + content signals).
-- Status values: `todo`, `in_progress`, `done`.
-- Plan status values: `planned`, `active`, `done`.
-- Plan item status values: `todo`, `in_progress`, `done`.
-- Roadmap status values: `planned`, `active`, `done`.
+- doc names are normalized (lowercase/safe chars) and stored as `.md`.
+- `add` and `update` accept inline content or a file path, but not both.
+- `docs search` default limit is `5`.
 
-## Bastion Backup Integration
-
-When enabled, mutating `base` commands (tasks/plans/roadmap/tags/docs/init) trigger a best-effort Bastion ingest of the current project's `.base` data directory.
-
-Configure with env vars:
+### Global search
 
 ```bash
-# optional; default is "bastion"
+base search <query> [-l|--limit <n>]
+```
+
+Searches tasks, plans, plan items, roadmap, and docs together.
+
+- default limit: `12`
+- results are grouped by entity type
+
+## IDs and Status Values
+
+Generated IDs use this format:
+
+- `#<sequence>-<slug>`
+- example: `#12-release-prep`
+
+You can often pass short IDs like `#12` instead of full IDs. If multiple IDs share the same sequence number, `base` returns an ambiguity error and asks for the full ID.
+
+Canonical statuses:
+
+- task / plan item: `todo`, `in_progress`, `done`
+- roadmap / plan: `planned`, `active`, `done`
+
+Accepted aliases include:
+
+- `in-progress`, `doing` -> `in_progress`
+- `plan` -> `planned`
+- `complete`, `completed` -> `done`
+
+## Bastion Auto-Ingest
+
+Mutating commands (`init`, tasks/plans/roadmap/tags/docs writes) can trigger best-effort Bastion ingest of the project data directory.
+
+Environment variables:
+
+```bash
+# optional binary override (default: bastion)
 export BASE_BASTION_BIN=bastion
 
-# default: enabled. set to 0/false/off to disable.
+# default is enabled; disable with 0/false/off
 export BASE_BASTION_AUTO_INGEST=true
 
-# global fallback ingest token
+# global fallback token
 export BASE_BASTION_INGEST_TOKEN=...
 
-# optional per-project token override:
-# BASE_BASTION_INGEST_TOKEN_<project_key_with_dashes_replaced_by_underscores>
+# optional project-scoped override
+# name shape: BASE_BASTION_INGEST_TOKEN_<project_key_with_dashes_replaced_by_underscores>
 export BASE_BASTION_INGEST_TOKEN_my_repo_ab12cd34ef56=...
 ```
 
-On each mutation, `base` runs:
+If Bastion is unavailable or token config is missing, `base` continues without failing the CLI command.
+
+## Development
+
+Type-check the full project:
 
 ```bash
-bastion auth ingest path-now --token <token> --source-path <project .base dir> --recursive
+funk check --severity error --quiet
 ```
 
-If Bastion is unavailable or no token is configured, `base` continues normally (no command failure).
+Type-check a specific entry graph:
+
+```bash
+funk check src/main.fun --severity error --quiet
+```
+
+Run the CLI:
+
+```bash
+funk run src/main.fun -- <args>
+funk script base -- <args>
+```
+
+Link global launcher:
+
+```bash
+funk script link
+```
+
+## Troubleshooting
+
+- `Error: Project is not initialized...`: run `base init` first.
+- `base: command not found`: run `funk script link` and ensure the launcher directory is in `PATH`.
+- `unknown command`: run `base help` for the canonical command list.
