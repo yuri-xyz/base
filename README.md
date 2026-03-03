@@ -8,10 +8,12 @@
 - project docs (plus fuzzy search)
 
 It auto-detects your Git repo root and stores data in repo-local or global scope.
+It is designed for human + AI pair workflows, including tools like Codex and Claude Code.
 
 ## Quick Links
 
 - [Why base](#why-base)
+- [AI Agent Workflow](#ai-agent-workflow)
 - [Installation and Run](#installation-and-run)
 - [Quickstart](#quickstart)
 - [Storage and Scope](#storage-and-scope)
@@ -28,6 +30,15 @@ It auto-detects your Git repo root and stores data in repo-local or global scope
 - Structured planning: plans, plan items, roadmap ordering, statuses
 - Built-in knowledge base: markdown docs with fuzzy search
 - Flexible scope: switch to global storage with `--global`
+- Agent-friendly CLI surface: explicit commands and predictable repo-scoped state
+
+## AI Agent Workflow
+
+`base` is optimized for coding-agent loops (for example Codex and Claude Code):
+
+- durable context: plans, tasks, roadmap, and docs live in-repo by default
+- deterministic command surface: simple verbs and stable statuses for automation
+- low-friction planning loop: agents can create/update/show/search without external services
 
 ## Installation and Run
 
