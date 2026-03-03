@@ -14,7 +14,9 @@ Run from repo root or any subdirectory; scope resolves to the same repository.
 ## Rule: Use CLI, Not Manual File Edits
 - Always use `base` commands to create/update/remove data.
 - Do **not** edit `.base/*.json` files by hand.
-- If a change is needed, map it to the corresponding CLI command (`tasks`, `plan`, `roadmap`, `docs`).
+- If a change is needed, map it to the corresponding CLI command (`tasks`, `tags`, `plan`, `roadmap`, `docs`).
+- Prefer `--help` or `-h` on the exact command you plan to use when you need to confirm syntax.
+- Treat unknown flags/extra args as errors; do not assume the CLI will ignore them.
 
 ## Storage Modes
 - Default (recommended): repo-local storage at `<repo-root>/.base`
@@ -40,6 +42,7 @@ base docs add architecture -f ./ARCHITECTURE.md
 ## Command Groups
 
 ### Tasks
+- alias: `base task ...`
 - `base tasks list [--all]`
 - `base tasks add <title> [-d ...] [-t tag1,tag2]`
 - `base tasks update <taskId> [--title ...] [-d ...] [--status ...] [-t ...]`
@@ -75,9 +78,10 @@ base docs add architecture -f ./ARCHITECTURE.md
 ### Docs / KB
 - `base docs list|show|add|update|remove`
 - `base docs search <query> [-l <n>]`
+- alias: `base kb search <query> [-l <n>]`
 - `base search <query> [-l <n>]` for cross-entity search (tasks, plans, roadmap, docs)
 
 ## Notes
-- `init` is required before mutating/listing project data.
+- `init` is required before mutating/listing project data, but command help works before initialization.
 - Plan/roadmap done entries stay visible with completion timestamps.
 - Use `funk script link` to install/update the global `base` launcher.

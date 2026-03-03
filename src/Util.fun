@@ -19,6 +19,12 @@ from @std/String import {
 }
 
 @public
+type alias CliOptionSpec = {
+  flags: List String,
+  expectsValue: Bool
+}
+
+@public
 fun normalizeStatus(raw: String): Option String {
   let lowered = toLowerCase(trim(raw));
 
@@ -339,6 +345,66 @@ fun fuzzyDocScore(queryRaw: String, nameRaw: String, contentRaw: String): Int {
 @public
 fun hasFlag(tokens: List String, shortFlag: String, longFlag: String): Bool {
   argsContains(tokens, shortFlag) or argsContains(tokens, longFlag)
+}
+
+@public
+fun hasHelpFlag(tokens: List String): Bool {
+  hasFlag(tokens, "-h", "--help")
+}
+
+@public
+fun isHelpRequest(tokens: List String): Bool {
+  match tokens with:
+    | ["help", ..._rest] -> true
+    | _ -> hasHelpFlag(tokens)
+}
+
+@public
+fun validateOptions(tokens: List String, specs: List CliOptionSpec): Result String Unit {
+  match tokens with:
+    | [] -> Result.Ok(())
+    | [token, ...rest] -> if startsWith(token, "-"):
+      match findMatchingOptionSpec(specs, token) with:
+        | Option.None -> Result.Err(`Unknown option: ${token}`)
+        | Option.Some spec -> validateMatchedOption(rest, specs, token, spec.expectsValue)
+    else:
+      Result.Err(`Unexpected argument: ${token}`)
+}
+
+fun validateMatchedOption(
+  rest: List String,
+  specs: List CliOptionSpec,
+  token: String,
+  expectsValue: Bool
+): Result String Unit {
+  if expectsValue:
+    validateOptionValue(rest, specs, token)
+  else:
+    validateOptions(rest, specs)
+}
+
+fun validateOptionValue(rest: List String, specs: List CliOptionSpec, token: String): Result String Unit {
+  match rest with:
+    | [] -> Result.Err(`Missing value for option: ${token}`)
+    | [_value, ...tail] -> validateOptions(tail, specs)
+}
+
+fun findMatchingOptionSpec(specs: List CliOptionSpec, token: String): Option CliOptionSpec {
+  match specs with:
+    | [] -> Option.None
+    | [spec, ...rest] -> if optionSpecContains(spec.flags, token):
+      Option.Some(spec)
+    else:
+      findMatchingOptionSpec(rest, token)
+}
+
+fun optionSpecContains(flags: List String, token: String): Bool {
+  match flags with:
+    | [] -> false
+    | [flag, ...rest] -> if flag == token:
+      true
+    else:
+      optionSpecContains(rest, token)
 }
 
 @public

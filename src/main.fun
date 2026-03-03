@@ -1,9 +1,26 @@
 from @std/Output import { line, errLine }
 from @std/FS import { readFile }
 from @std/Process import { userArgs, exit }
-from @std/String import { parseIntOr, trim, join }
+from @std/String import { parseIntOr, trim }
+from "./DisplayCli" import { printDocList, printRoadmapItem, printRoadmapList, printTask, printTaskList }
 from "./DocSearchCli" import { runDocSearchCommand }
 from "./Docs" import { listDocs, showDoc, addDoc, updateDoc, removeDoc }
+from "./HelpCli" import {
+  failInvalidKbCommand,
+  failInvalidDocsCommand,
+  failInvalidRoadmapCommand,
+  failInvalidTasksCommand,
+  printDocsCommandHelp,
+  printDocsHelp,
+  printInitHelp,
+  printKbHelp,
+  printMainHelp,
+  printRoadmapCommandHelp,
+  printRoadmapHelp,
+  printSearchHelp,
+  printTaskCommandHelp,
+  printTasksHelp
+}
 from "./Models" import { Scope, Task, TaskPatch, RoadmapItem, RoadmapPatch }
 from "./PlanCli" import { runPlanCommand, planUsage }
 from "./Roadmap" import {
@@ -20,8 +37,12 @@ from "./Store" import { isInitialized, initialize, requireInitialized }
 from "./TagsCli" import { runTagsCommand, tagsUsage }
 from "./Tasks" import { listTasks, addTask, updateTask, removeTask }
 from "./Util" import {
+  CliOptionSpec,
   findOptionValue,
+  hasHelpFlag,
   hasFlag,
+  isHelpRequest,
+  validateOptions,
   stripToken,
   parseTagsCsv,
   normalizeDocName
@@ -37,71 +58,23 @@ fun main(): Unit effects { IO } {
   match args with:
     | [] -> showOverview(scope)
     | ["init"] -> runInit(scope)
+    | ["init", "-h"] -> printInitHelp()
+    | ["init", "--help"] -> printInitHelp()
     | ["tasks", ...rest] -> runTasks(scope, rest)
+    | ["task", ...rest] -> runTasks(scope, rest)
     | ["tags", ...rest] -> runTags(scope, rest)
     | ["plan", ...rest] -> runPlan(scope, rest)
     | ["roadmap", ...rest] -> runRoadmap(scope, rest)
     | ["docs", ...rest] -> runDocs(scope, rest)
-    | ["search", query, ...opts] -> runSearch(scope, query, opts)
-    | ["help"] -> printHelp()
-    | ["--help"] -> printHelp()
+    | ["kb", ...rest] -> runKb(scope, rest)
+    | ["search", ...rest] -> runSearchEntry(scope, rest)
+    | ["help"] -> printMainHelp()
+    | ["-h"] -> printMainHelp()
+    | ["--help"] -> printMainHelp()
     | _ ->
         errLine("Error: unknown command");
-        printHelp();
+        printMainHelp();
         exit(1)
-}
-
-fun printHelp(): Unit effects { IO } {
-  line("base - Git-scoped project tasks and docs");
-  line("");
-  line("Storage mode:");
-  line("  default: <repo-root>/.base");
-  line("  add --global to use user-level storage (~/.base or BASE_HOME)");
-  line("");
-  line("Usage:");
-  line("  base");
-  line("  base init");
-  line("  base tasks list [--all]");
-  line("  base tasks add <title> [-d|--description <text>] [-t|--tags <csv>] [--id <key>]");
-  line(
-    "  base tasks update <taskId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>] [-t|--tags <csv>]",
-  );
-  line("  base tasks set-status <taskId> <todo|in_progress|done>");
-  line("  base tasks remove <taskId>");
-  line("  base tags list");
-  line("  base tags add <tag>");
-  line("  base tags remove <tag>");
-  line("  base tags rename <from> <to>");
-  line("  base plan list [--all]");
-  line("  base plan create <title> [-d|--description <text>] [--id <key>]");
-  line("  base plan show <planId>");
-  line("  base plan set-status <planId> <planned|active|done>");
-  line(
-    "  base plan update <planId> [--title <text>] [-d|--description <text>] [--status <planned|active|done>]",
-  );
-  line("  base plan remove <planId>");
-  line("  base plan add-item <planId> <title> [-d|--description <text>] [--id <key>]");
-  line(
-    "  base plan update-item <planId> <itemId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>]",
-  );
-  line("  base plan set-item-status <planId> <itemId> <todo|in_progress|done>");
-  line("  base plan move-item <planId> <itemId> <position>");
-  line("  base plan remove-item <planId> <itemId>");
-  line("  base roadmap list");
-  line("  base roadmap add <goal> [-d|--description <text>] [--id <key>]");
-  line(
-    "  base roadmap update <itemId> [--goal <text>] [-d|--description <text>] [--status <planned|active|done>]",
-  );
-  line("  base roadmap set-status <itemId> <planned|active|done>");
-  line("  base roadmap move <itemId> <position>");
-  line("  base roadmap remove <itemId>");
-  line("  base docs list");
-  line("  base docs show <name>");
-  line("  base docs add <name> [-c|--content <text>] [-f|--file <path>]");
-  line("  base docs update <name> [-c|--content <text>] [-f|--file <path>]");
-  line("  base docs remove <name>");
-  line("  base docs search <query> [-l|--limit <n>]");
-  line("  base search <query> [-l|--limit <n>]");
 }
 
 fun runInit(scope: Scope): Unit effects { IO } {
@@ -159,23 +132,38 @@ fun loadOverviewRoadmap(
 }
 
 fun runTasks(scope: Scope, rest: List String): Unit effects { IO } {
-  requireReady(scope);
+  if isHelpRequest(rest):
+    ()
+  else:
+    requireReady(scope);
 
   match rest with:
     | [] -> runTaskList(scope, [])
-    | ["list", ...opts] -> runTaskList(scope, opts)
-    | ["add", title, ...opts] -> runTaskAdd(scope, title, opts)
-    | ["update", taskId, ...opts] -> runTaskUpdate(scope, taskId, opts)
-    | ["set-status", taskId, statusRaw] -> runTaskUpdate(scope, taskId, ["--status", statusRaw])
-    | ["remove", taskId] -> runTaskRemove(scope, taskId)
-    | _ ->
-        errLine("Error: invalid tasks command");
-        line("Usage: base tasks <list|add|update|set-status|remove> ...");
+    | ["help"] -> printTasksHelp()
+    | ["-h"] -> printTasksHelp()
+    | ["--help"] -> printTasksHelp()
+    | ["help", command] -> printTaskCommandHelp(command)
+    | [command, ...args] -> runTasksCommand(scope, command, args)
+}
 
-        exit(1)
+fun runTasksCommand(scope: Scope, command: String, args: List String): Unit effects { IO } {
+  if hasHelpFlag(args):
+    printTaskCommandHelp(command)
+  else:
+    match (command, args) with:
+      | ("list", opts) -> runTaskList(scope, opts)
+      | ("add", [title, ...opts]) -> runTaskAdd(scope, title, opts)
+      | ("update", [taskId, ...opts]) -> runTaskUpdate(scope, taskId, opts)
+      | ("set-status", [taskId, statusRaw]) -> runTaskUpdate(scope, taskId, ["--status", statusRaw])
+      | ("remove", [taskId]) -> runTaskRemove(scope, taskId)
+      | _ -> failInvalidTasksCommand()
 }
 
 fun runTaskList(scope: Scope, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, taskListOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   let includeDone = hasFlag(opts, "--all", "--all");
 
   match listTasks(scope, includeDone) with:
@@ -187,6 +175,10 @@ fun runTaskList(scope: Scope, opts: List String): Unit effects { IO } {
 }
 
 fun runTaskAdd(scope: Scope, title: String, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, taskAddOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
   let tagsRaw = getOrElse(findOptionValue(opts, "-t", "--tags"), "");
   let tags = parseTagsCsv(tagsRaw);
@@ -201,6 +193,10 @@ fun runTaskAdd(scope: Scope, title: String, opts: List String): Unit effects { I
 }
 
 fun runTaskUpdate(scope: Scope, taskId: String, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, taskUpdateOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   let titleOpt = mapOption(findOptionValue(opts, "--title", "--title"), trim);
   let descriptionOpt = mapOption(findOptionValue(opts, "-d", "--description"), trim);
   let tagsOpt = mapOption(findOptionValue(opts, "-t", "--tags"), parseTagsCsv);
@@ -236,7 +232,10 @@ fun runTaskRemove(scope: Scope, taskId: String): Unit effects { IO } {
 }
 
 fun runPlan(scope: Scope, rest: List String): Unit effects { IO } {
-  requireReady(scope);
+  if isHelpRequest(rest):
+    ()
+  else:
+    requireReady(scope);
   match runPlanCommand(scope, rest) with:
     | Result.Err e -> if e == planUsage():
       errLine("Error: invalid plan command");
@@ -248,7 +247,10 @@ fun runPlan(scope: Scope, rest: List String): Unit effects { IO } {
 }
 
 fun runTags(scope: Scope, rest: List String): Unit effects { IO } {
-  requireReady(scope);
+  if isHelpRequest(rest):
+    ()
+  else:
+    requireReady(scope);
   match runTagsCommand(scope, rest) with:
     | Result.Err e -> if e == tagsUsage():
       errLine("Error: invalid tags command");
@@ -260,30 +262,49 @@ fun runTags(scope: Scope, rest: List String): Unit effects { IO } {
 }
 
 fun runRoadmap(scope: Scope, rest: List String): Unit effects { IO } {
-  requireReady(scope);
+  if isHelpRequest(rest):
+    ()
+  else:
+    requireReady(scope);
 
   match rest with:
-    | [] -> runRoadmapList(scope)
-    | ["list"] -> runRoadmapList(scope)
-    | ["add", goal, ...opts] -> runRoadmapAdd(scope, goal, opts)
-    | ["update", itemId, ...opts] -> runRoadmapUpdate(scope, itemId, opts)
-    | ["set-status", itemId, statusRaw] -> runRoadmapUpdate(scope, itemId, ["--status", statusRaw])
-    | ["move", itemId, positionText] -> runRoadmapMove(scope, itemId, positionText)
-    | ["remove", itemId] -> runRoadmapRemove(scope, itemId)
-    | _ ->
-        errLine("Error: invalid roadmap command");
-        line("Usage: base roadmap <list|add|update|set-status|move|remove> ...");
-
-        exit(1)
+    | [] -> runRoadmapList(scope, [])
+    | ["help"] -> printRoadmapHelp()
+    | ["-h"] -> printRoadmapHelp()
+    | ["--help"] -> printRoadmapHelp()
+    | ["help", command] -> printRoadmapCommandHelp(command)
+    | [command, ...args] -> runRoadmapCommand(scope, command, args)
 }
 
-fun runRoadmapList(scope: Scope): Unit effects { IO } {
+fun runRoadmapCommand(scope: Scope, command: String, args: List String): Unit effects { IO } {
+  if hasHelpFlag(args):
+    printRoadmapCommandHelp(command)
+  else:
+    match (command, args) with:
+      | ("list", opts) -> runRoadmapList(scope, opts)
+      | ("add", [goal, ...opts]) -> runRoadmapAdd(scope, goal, opts)
+      | ("update", [itemId, ...opts]) -> runRoadmapUpdate(scope, itemId, opts)
+      | ("set-status", [itemId, statusRaw]) -> runRoadmapUpdate(scope, itemId, ["--status", statusRaw])
+      | ("move", [itemId, positionText]) -> runRoadmapMove(scope, itemId, positionText)
+      | ("remove", [itemId]) -> runRoadmapRemove(scope, itemId)
+      | _ -> failInvalidRoadmapCommand()
+}
+
+fun runRoadmapList(scope: Scope, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, []) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   match listRoadmap(scope) with:
     | Result.Err e -> fail(e)
     | Result.Ok items -> printRoadmapList(items, "Roadmap goals")
 }
 
 fun runRoadmapAdd(scope: Scope, goal: String, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, roadmapAddOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
   let idKeyOpt = findOptionValue(opts, "--id", "--id");
 
@@ -295,6 +316,10 @@ fun runRoadmapAdd(scope: Scope, goal: String, opts: List String): Unit effects {
 }
 
 fun runRoadmapUpdate(scope: Scope, itemId: String, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, roadmapUpdateOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   let goalOpt = mapOption(findOptionValue(opts, "--goal", "--goal"), trim);
   let descriptionOpt = mapOption(findOptionValue(opts, "-d", "--description"), trim);
   let statusRawOpt = findOptionValue(opts, "--status", "--status");
@@ -338,24 +363,39 @@ fun runRoadmapRemove(scope: Scope, itemId: String): Unit effects { IO } {
 }
 
 fun runDocs(scope: Scope, rest: List String): Unit effects { IO } {
-  requireReady(scope);
+  if isHelpRequest(rest):
+    ()
+  else:
+    requireReady(scope);
 
   match rest with:
-    | [] -> runDocList(scope)
-    | ["list"] -> runDocList(scope)
-    | ["show", name] -> runDocShow(scope, name)
-    | ["add", name, ...opts] -> runDocAdd(scope, name, opts)
-    | ["update", name, ...opts] -> runDocUpdate(scope, name, opts)
-    | ["remove", name] -> runDocRemove(scope, name)
-    | ["search", query, ...opts] -> runDocSearch(scope, query, opts)
-    | _ ->
-        errLine("Error: invalid docs command");
-        line("Usage: base docs <list|show|add|update|remove|search> ...");
-
-        exit(1)
+    | [] -> runDocList(scope, [])
+    | ["help"] -> printDocsHelp()
+    | ["-h"] -> printDocsHelp()
+    | ["--help"] -> printDocsHelp()
+    | ["help", command] -> printDocsCommandHelp(command)
+    | [command, ...args] -> runDocsCommand(scope, command, args)
 }
 
-fun runDocList(scope: Scope): Unit effects { IO } {
+fun runDocsCommand(scope: Scope, command: String, args: List String): Unit effects { IO } {
+  if hasHelpFlag(args):
+    printDocsCommandHelp(command)
+  else:
+    match (command, args) with:
+      | ("list", opts) -> runDocList(scope, opts)
+      | ("show", [name]) -> runDocShow(scope, name)
+      | ("add", [name, ...opts]) -> runDocAdd(scope, name, opts)
+      | ("update", [name, ...opts]) -> runDocUpdate(scope, name, opts)
+      | ("remove", [name]) -> runDocRemove(scope, name)
+      | ("search", [query, ...opts]) -> runDocSearch(scope, query, opts)
+      | _ -> failInvalidDocsCommand()
+}
+
+fun runDocList(scope: Scope, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, []) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   match listDocs(scope) with:
     | Result.Err e -> fail(e)
     | Result.Ok docs -> printDocList(docs)
@@ -373,6 +413,10 @@ fun runDocShow(scope: Scope, name: String): Unit effects { IO } {
 }
 
 fun runDocAdd(scope: Scope, name: String, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, docContentOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   match resolveDocContent(opts, false) with:
     | Result.Err e -> fail(e)
     | Result.Ok content -> match addDoc(scope, name, content) with:
@@ -381,6 +425,10 @@ fun runDocAdd(scope: Scope, name: String, opts: List String): Unit effects { IO 
 }
 
 fun runDocUpdate(scope: Scope, name: String, opts: List String): Unit effects { IO } {
+  match validateOptions(opts, docContentOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   match resolveDocContent(opts, true) with:
     | Result.Err e -> fail(e)
     | Result.Ok content -> match updateDoc(scope, name, content) with:
@@ -398,14 +446,58 @@ fun runDocRemove(scope: Scope, name: String): Unit effects { IO } {
 }
 
 fun runDocSearch(scope: Scope, query: String, opts: List String): Unit effects { IO } {
-  requireReady(scope);
+  match validateOptions(opts, searchLimitOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   match runDocSearchCommand(scope, query, opts) with:
     | Result.Err e -> fail(e)
     | Result.Ok _ -> ()
 }
 
+fun runKb(scope: Scope, rest: List String): Unit effects { IO } {
+  if isHelpRequest(rest):
+    ()
+  else:
+    requireReady(scope);
+
+  match rest with:
+    | [] -> printKbHelp()
+    | ["help"] -> printKbHelp()
+    | ["-h"] -> printKbHelp()
+    | ["--help"] -> printKbHelp()
+    | ["search"] -> printKbHelp()
+    | ["search", ...args] -> if hasHelpFlag(args):
+      printKbHelp()
+    else:
+      match args with:
+        | [query, ...opts] -> runDocSearch(scope, query, opts)
+        | _ -> failInvalidKbCommand()
+    | _ -> failInvalidKbCommand()
+}
+
+fun runSearchEntry(scope: Scope, rest: List String): Unit effects { IO } {
+  if isHelpRequest(rest):
+    ()
+  else:
+    requireReady(scope);
+
+  match rest with:
+    | [] -> printSearchHelp()
+    | ["help"] -> printSearchHelp()
+    | ["-h"] -> printSearchHelp()
+    | ["--help"] -> printSearchHelp()
+    | [query, ...opts] -> if hasHelpFlag(rest):
+      printSearchHelp()
+    else:
+      runSearch(scope, query, opts)
+}
+
 fun runSearch(scope: Scope, query: String, opts: List String): Unit effects { IO } {
-  requireReady(scope);
+  match validateOptions(opts, searchLimitOptionSpecs()) with:
+    | Result.Err e -> fail(e)
+    | Result.Ok _ -> ();
+
   match runGlobalSearchCommand(scope, query, opts) with:
     | Result.Err e -> fail(e)
     | Result.Ok _ -> ()
@@ -427,6 +519,53 @@ fun resolveDocContent(opts: List String, required: Bool): Result String String e
       Result.Ok("")
 }
 
+fun taskListOptionSpecs(): List CliOptionSpec {
+  [{ flags: ["--all"], expectsValue: false }]
+}
+
+fun taskAddOptionSpecs(): List CliOptionSpec {
+  [
+    { flags: ["-d", "--description"], expectsValue: true },
+    { flags: ["-t", "--tags"], expectsValue: true },
+    { flags: ["--id"], expectsValue: true },
+  ]
+}
+
+fun taskUpdateOptionSpecs(): List CliOptionSpec {
+  [
+    { flags: ["--title"], expectsValue: true },
+    { flags: ["-d", "--description"], expectsValue: true },
+    { flags: ["--status"], expectsValue: true },
+    { flags: ["-t", "--tags"], expectsValue: true },
+  ]
+}
+
+fun roadmapAddOptionSpecs(): List CliOptionSpec {
+  [
+    { flags: ["-d", "--description"], expectsValue: true },
+    { flags: ["--id"], expectsValue: true },
+  ]
+}
+
+fun roadmapUpdateOptionSpecs(): List CliOptionSpec {
+  [
+    { flags: ["--goal"], expectsValue: true },
+    { flags: ["-d", "--description"], expectsValue: true },
+    { flags: ["--status"], expectsValue: true },
+  ]
+}
+
+fun docContentOptionSpecs(): List CliOptionSpec {
+  [
+    { flags: ["-c", "--content"], expectsValue: true },
+    { flags: ["-f", "--file"], expectsValue: true },
+  ]
+}
+
+fun searchLimitOptionSpecs(): List CliOptionSpec {
+  [{ flags: ["-l", "--limit"], expectsValue: true }]
+}
+
 fun requireReady(scope: Scope): Unit effects { IO } {
   match requireInitialized(scope) with:
     | Result.Err e -> fail(e)
@@ -444,104 +583,6 @@ fun printScopeSummary(scope: Scope): Unit effects { IO } {
   line(`Repo root: ${scope.repoRoot}`);
 
   line(`Store: ${scope.projectDir}`)
-}
-
-fun printTask(task: Task): Unit effects { IO } {
-  line(`[${task.id}] ${task.title}`);
-  line(`  status: ${task.status}`);
-
-  if task.tags == []:
-    ()
-  else:
-    let tagsText = join(task.tags, ", ");
-
-    line(`  tags: ${tagsText}`);
-
-  if task.description == "":
-    ()
-  else:
-    line(`  note: ${task.description}`)
-}
-
-fun printTaskList(tasks: List Task, title: String): Unit effects { IO } {
-  line(title);
-
-  match tasks with:
-    | [] -> line("  (none)")
-    | _ -> printTaskListItems(tasks, false)
-}
-
-fun printTaskListItems(tasks: List Task, started: Bool): Unit effects { IO } {
-  match tasks with:
-    | [] -> ()
-    | [task, ...rest] -> {
-        if started:
-          line("------------------------------------------------------------")
-        else:
-          ();
-
-        printTask(task);
-
-        printTaskListItems(rest, true)
-	      }
-}
-
-fun printRoadmapList(items: List RoadmapItem, title: String): Unit effects { IO } {
-  line(title);
-
-  match items with:
-    | [] -> line("  (none)")
-    | _ -> printRoadmapListItems(items)
-}
-
-fun printRoadmapListItems(items: List RoadmapItem): Unit effects { IO } {
-  match items with:
-    | [] -> ()
-    | [item, ...rest] -> {
-        printRoadmapItem(item);
-        printRoadmapListItems(rest)
-      }
-}
-
-fun printRoadmapItem(item: RoadmapItem): Unit effects { IO } {
-  let orderText = show(item.order);
-  line(`${orderText}. [${item.status}] ${item.goal}`);
-  line(`   id: ${item.id}`);
-
-  if item.description == "":
-    ()
-  else:
-    line(`   note: ${item.description}`);
-
-  if item.status == "done":
-    let completed = completedText(item.completedAt);
-    line(`   completed: ${completed}`)
-  else:
-    ()
-}
-
-fun completedText(completedAt: Option String): String {
-  match completedAt with:
-    | Option.None -> "unknown"
-    | Option.Some at -> at
-}
-
-fun printDocList(docs: List String): Unit effects { IO } {
-  line("Docs");
-
-  match docs with:
-    | [] -> line("  (none)")
-    | _ -> printDocListItems(docs)
-}
-
-fun printDocListItems(docs: List String): Unit effects { IO } {
-  match docs with:
-    | [] -> ()
-    | [doc, ...rest] -> {
-        line(`  - ${doc}`);
-
-        printDocListItems(rest)
-      }
 }
 
 fun max(a: Int, b: Int): Int {

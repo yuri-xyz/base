@@ -13,24 +13,25 @@ from "./Plans" import {
   movePlanItem,
   removePlanItem
 }
-from "./Util" import { findOptionValue, hasFlag, normalizePlanStatus, normalizeStatus }
+from "./Util" import {
+  CliOptionSpec,
+  findOptionValue,
+  hasFlag,
+  hasHelpFlag,
+  normalizePlanStatus,
+  normalizeStatus,
+  validateOptions
+}
 
 @public
 fun runPlanCommand(scope: Scope, rest: List String): Result String Unit effects { IO } {
   match rest with:
     | [] -> runPlanList(scope, [])
-    | ["list", ...opts] -> runPlanList(scope, opts)
-    | ["create", title, ...opts] -> runPlanCreate(scope, title, opts)
-    | ["show", planId] -> runPlanShow(scope, planId)
-    | ["set-status", planId, statusRaw] -> runPlanSetStatus(scope, planId, statusRaw)
-    | ["update", planId, ...opts] -> runPlanUpdate(scope, planId, opts)
-    | ["remove", planId] -> runPlanRemove(scope, planId)
-    | ["add-item", planId, title, ...opts] -> runPlanAddItem(scope, planId, title, opts)
-    | ["update-item", planId, itemId, ...opts] -> runPlanUpdateItem(scope, planId, itemId, opts)
-    | ["set-item-status", planId, itemId, statusRaw] -> runPlanSetItemStatus(scope, planId, itemId, statusRaw)
-    | ["move-item", planId, itemId, positionText] -> runPlanMoveItem(scope, planId, itemId, positionText)
-    | ["remove-item", planId, itemId] -> runPlanRemoveItem(scope, planId, itemId)
-    | _ -> Result.Err(planUsage())
+    | ["help"] -> showPlanHelp()
+    | ["-h"] -> showPlanHelp()
+    | ["--help"] -> showPlanHelp()
+    | ["help", command] -> showPlanCommandHelp(command)
+    | [command, ...args] -> runPlanCommandWithArgs(scope, command, args)
 }
 
 @public
@@ -38,27 +39,143 @@ fun planUsage(): String {
   "Usage: base plan <list|create|show|set-status|update|remove|add-item|update-item|set-item-status|move-item|remove-item> ..."
 }
 
-fun runPlanList(scope: Scope, opts: List String): Result String Unit effects { IO } {
-  let includeDone = hasFlag(opts, "--all", "--all");
-  let title = if includeDone: "All plans" else: "Plans";
+fun runPlanCommandWithArgs(
+  scope: Scope,
+  command: String,
+  args: List String
+): Result String Unit effects { IO } {
+  if hasHelpFlag(args):
+    showPlanCommandHelp(command)
+  else:
+    match (command, args) with:
+      | ("list", opts) -> runPlanList(scope, opts)
+      | ("create", [title, ...opts]) -> runPlanCreate(scope, title, opts)
+      | ("show", [planId]) -> runPlanShow(scope, planId)
+      | ("set-status", [planId, statusRaw]) -> runPlanSetStatus(scope, planId, statusRaw)
+      | ("update", [planId, ...opts]) -> runPlanUpdate(scope, planId, opts)
+      | ("remove", [planId]) -> runPlanRemove(scope, planId)
+      | ("add-item", [planId, title, ...opts]) -> runPlanAddItem(scope, planId, title, opts)
+      | ("update-item", [planId, itemId, ...opts]) -> runPlanUpdateItem(scope, planId, itemId, opts)
+      | ("set-item-status", [planId, itemId, statusRaw]) -> runPlanSetItemStatus(scope, planId, itemId, statusRaw)
+      | ("move-item", [planId, itemId, positionText]) -> runPlanMoveItem(scope, planId, itemId, positionText)
+      | ("remove-item", [planId, itemId]) -> runPlanRemoveItem(scope, planId, itemId)
+      | _ -> Result.Err(planUsage())
+}
 
-  match listPlans(scope, includeDone) with:
+fun showPlanHelp(): Result String Unit effects { IO } {
+  printPlanHelp();
+  Result.Ok(())
+}
+
+fun showPlanCommandHelp(command: String): Result String Unit effects { IO } {
+  printPlanCommandHelp(command);
+  Result.Ok(())
+}
+
+fun printPlanHelp(): Unit effects { IO } {
+  printLines([
+    "Usage:",
+    "  base plan list [--all]",
+    "  base plan create <title> [-d|--description <text>] [--id <key>]",
+    "  base plan show <planId>",
+    "  base plan set-status <planId> <planned|active|done>",
+    "  base plan update <planId> [--title <text>] [-d|--description <text>] [--status <planned|active|done>]",
+    "  base plan remove <planId>",
+    "  base plan add-item <planId> <title> [-d|--description <text>] [--id <key>]",
+    "  base plan update-item <planId> <itemId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>]",
+    "  base plan set-item-status <planId> <itemId> <todo|in_progress|done>",
+    "  base plan move-item <planId> <itemId> <position>",
+    "  base plan remove-item <planId> <itemId>",
+  ])
+}
+
+fun printPlanCommandHelp(command: String): Unit effects { IO } {
+  match command with:
+    | "list" -> printLines([
+      "Usage:",
+      "  base plan list [--all]",
+    ])
+    | "create" -> printLines([
+      "Usage:",
+      "  base plan create <title> [-d|--description <text>] [--id <key>]",
+    ])
+    | "show" -> printLines([
+      "Usage:",
+      "  base plan show <planId>",
+    ])
+    | "set-status" -> printLines([
+      "Usage:",
+      "  base plan set-status <planId> <planned|active|done>",
+    ])
+    | "update" -> printLines([
+      "Usage:",
+      "  base plan update <planId> [--title <text>] [-d|--description <text>] [--status <planned|active|done>]",
+    ])
+    | "remove" -> printLines([
+      "Usage:",
+      "  base plan remove <planId>",
+    ])
+    | "add-item" -> printLines([
+      "Usage:",
+      "  base plan add-item <planId> <title> [-d|--description <text>] [--id <key>]",
+    ])
+    | "update-item" -> printLines([
+      "Usage:",
+      "  base plan update-item <planId> <itemId> [--title <text>] [-d|--description <text>] [--status <todo|in_progress|done>]",
+    ])
+    | "set-item-status" -> printLines([
+      "Usage:",
+      "  base plan set-item-status <planId> <itemId> <todo|in_progress|done>",
+    ])
+    | "move-item" -> printLines([
+      "Usage:",
+      "  base plan move-item <planId> <itemId> <position>",
+    ])
+    | "remove-item" -> printLines([
+      "Usage:",
+      "  base plan remove-item <planId> <itemId>",
+    ])
+    | _ -> printPlanHelp()
+}
+
+fun printLines(lines: List String): Unit effects { IO } {
+  match lines with:
+    | [] -> ()
+    | [next, ...rest] -> {
+        line(next);
+        printLines(rest)
+      }
+}
+
+fun runPlanList(scope: Scope, opts: List String): Result String Unit effects { IO } {
+  match validateOptions(opts, planListOptionSpecs()) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plans ->
-        printPlanList(plans, title);
-        Result.Ok(())
+    | Result.Ok _ -> {
+      let includeDone = hasFlag(opts, "--all", "--all");
+      let title = if includeDone: "All plans" else: "Plans";
+
+      match listPlans(scope, includeDone) with:
+        | Result.Err e -> Result.Err(e)
+        | Result.Ok plans ->
+            printPlanList(plans, title);
+            Result.Ok(())
+    }
 }
 
 fun runPlanCreate(scope: Scope, title: String, opts: List String): Result String Unit effects { IO } {
-  let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
-  let idKeyOpt = findOptionValue(opts, "--id", "--id");
-
-  match createPlan(scope, title, description, idKeyOpt) with:
+  match validateOptions(opts, planCreateOptionSpecs()) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok plan ->
-        line("Plan created:");
-        printPlan(plan);
-        Result.Ok(())
+    | Result.Ok _ -> {
+      let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
+      let idKeyOpt = findOptionValue(opts, "--id", "--id");
+
+      match createPlan(scope, title, description, idKeyOpt) with:
+        | Result.Err e -> Result.Err(e)
+        | Result.Ok plan ->
+            line("Plan created:");
+            printPlan(plan);
+            Result.Ok(())
+    }
 }
 
 fun runPlanShow(scope: Scope, planId: String): Result String Unit effects { IO } {
@@ -70,28 +187,45 @@ fun runPlanShow(scope: Scope, planId: String): Result String Unit effects { IO }
 }
 
 fun runPlanUpdate(scope: Scope, planId: String, opts: List String): Result String Unit effects { IO } {
-  let titleOpt = mapOption(findOptionValue(opts, "--title", "--title"), trim);
-  let descriptionOpt = mapOption(findOptionValue(opts, "-d", "--description"), trim);
-  let statusRawOpt = findOptionValue(opts, "--status", "--status");
-  let statusOptResult = normalizePlanStatusOption(statusRawOpt);
+  match validateOptions(opts, planUpdateOptionSpecs()) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok _ -> {
+      let titleOpt = mapOption(findOptionValue(opts, "--title", "--title"), trim);
+      let descriptionOpt = mapOption(findOptionValue(opts, "-d", "--description"), trim);
+      let statusRawOpt = findOptionValue(opts, "--status", "--status");
+      let statusOptResult = normalizePlanStatusOption(statusRawOpt);
 
+      runPlanUpdateValidated(scope, planId, titleOpt, descriptionOpt, statusOptResult)
+    }
+}
+
+fun runPlanUpdateValidated(
+  scope: Scope,
+  planId: String,
+  titleOpt: Option String,
+  descriptionOpt: Option String,
+  statusOptResult: Result String (Option String)
+): Result String Unit effects { IO } {
   match statusOptResult with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok statusOpt -> if isNone(titleOpt) and isNone(descriptionOpt) and isNone(statusOpt):
-      Result.Err("No updates provided. Use --title/--description/--status")
-    else:
-      let patch: PlanPatch = {
-        title: titleOpt,
-        description: descriptionOpt,
-        status: statusOpt,
-      };
+    | Result.Ok statusOpt ->
+        if isNone(titleOpt) and isNone(descriptionOpt) and isNone(statusOpt):
+          Result.Err("No updates provided. Use --title/--description/--status")
+        else:
+          persistPlanUpdate(scope, planId, {
+            title: titleOpt,
+            description: descriptionOpt,
+            status: statusOpt,
+          })
+}
 
-      match updatePlan(scope, planId, patch) with:
-        | Result.Err e -> Result.Err(e)
-        | Result.Ok plan ->
-            line("Plan updated:");
-            printPlan(plan);
-            Result.Ok(())
+fun persistPlanUpdate(scope: Scope, planId: String, patch: PlanPatch): Result String Unit effects { IO } {
+  match updatePlan(scope, planId, patch) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok plan ->
+        line("Plan updated:");
+        printPlan(plan);
+        Result.Ok(())
 }
 
 fun runPlanSetStatus(scope: Scope, planId: String, statusRaw: String): Result String Unit effects { IO } {
@@ -126,15 +260,19 @@ fun runPlanAddItem(
   title: String,
   opts: List String
 ): Result String Unit effects { IO } {
-  let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
-  let idKeyOpt = findOptionValue(opts, "--id", "--id");
-
-  match addPlanItem(scope, planId, title, description, idKeyOpt) with:
+  match validateOptions(opts, planCreateOptionSpecs()) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok item ->
-        line("Plan item created:");
-        printPlanItem(item);
-        Result.Ok(())
+    | Result.Ok _ -> {
+      let description = getOrElse(findOptionValue(opts, "-d", "--description"), "");
+      let idKeyOpt = findOptionValue(opts, "--id", "--id");
+
+      match addPlanItem(scope, planId, title, description, idKeyOpt) with:
+        | Result.Err e -> Result.Err(e)
+        | Result.Ok item ->
+            line("Plan item created:");
+            printPlanItem(item);
+            Result.Ok(())
+    }
 }
 
 fun runPlanUpdateItem(
@@ -143,28 +281,51 @@ fun runPlanUpdateItem(
   itemId: String,
   opts: List String
 ): Result String Unit effects { IO } {
-  let titleOpt = mapOption(findOptionValue(opts, "--title", "--title"), trim);
-  let descriptionOpt = mapOption(findOptionValue(opts, "-d", "--description"), trim);
-  let statusRawOpt = findOptionValue(opts, "--status", "--status");
-  let statusOptResult = normalizePlanItemStatusOption(statusRawOpt);
+  match validateOptions(opts, planUpdateOptionSpecs()) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok _ -> {
+      let titleOpt = mapOption(findOptionValue(opts, "--title", "--title"), trim);
+      let descriptionOpt = mapOption(findOptionValue(opts, "-d", "--description"), trim);
+      let statusRawOpt = findOptionValue(opts, "--status", "--status");
+      let statusOptResult = normalizePlanItemStatusOption(statusRawOpt);
 
+      runPlanUpdateItemValidated(scope, planId, itemId, titleOpt, descriptionOpt, statusOptResult)
+    }
+}
+
+fun runPlanUpdateItemValidated(
+  scope: Scope,
+  planId: String,
+  itemId: String,
+  titleOpt: Option String,
+  descriptionOpt: Option String,
+  statusOptResult: Result String (Option String)
+): Result String Unit effects { IO } {
   match statusOptResult with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok statusOpt -> if isNone(titleOpt) and isNone(descriptionOpt) and isNone(statusOpt):
-      Result.Err("No updates provided. Use --title/--description/--status")
-    else:
-      let patch: PlanItemPatch = {
-        title: titleOpt,
-        description: descriptionOpt,
-        status: statusOpt,
-      };
+    | Result.Ok statusOpt ->
+        if isNone(titleOpt) and isNone(descriptionOpt) and isNone(statusOpt):
+          Result.Err("No updates provided. Use --title/--description/--status")
+        else:
+          persistPlanItemUpdate(scope, planId, itemId, {
+            title: titleOpt,
+            description: descriptionOpt,
+            status: statusOpt,
+          })
+}
 
-      match updatePlanItem(scope, planId, itemId, patch) with:
-        | Result.Err e -> Result.Err(e)
-        | Result.Ok item ->
-            line("Plan item updated:");
-            printPlanItem(item);
-            Result.Ok(())
+fun persistPlanItemUpdate(
+  scope: Scope,
+  planId: String,
+  itemId: String,
+  patch: PlanItemPatch
+): Result String Unit effects { IO } {
+  match updatePlanItem(scope, planId, itemId, patch) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok item ->
+        line("Plan item updated:");
+        printPlanItem(item);
+        Result.Ok(())
 }
 
 fun runPlanSetItemStatus(
@@ -314,4 +475,23 @@ fun completedText(completedAt: Option String): String {
 
 fun max(a: Int, b: Int): Int {
   if a > b: a else: b
+}
+
+fun planListOptionSpecs(): List CliOptionSpec {
+  [{ flags: ["--all"], expectsValue: false }]
+}
+
+fun planCreateOptionSpecs(): List CliOptionSpec {
+  [
+    { flags: ["-d", "--description"], expectsValue: true },
+    { flags: ["--id"], expectsValue: true },
+  ]
+}
+
+fun planUpdateOptionSpecs(): List CliOptionSpec {
+  [
+    { flags: ["--title"], expectsValue: true },
+    { flags: ["-d", "--description"], expectsValue: true },
+    { flags: ["--status"], expectsValue: true },
+  ]
 }
