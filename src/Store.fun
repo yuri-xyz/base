@@ -1,5 +1,7 @@
 from @std/FS import { exists, ensureDir, writeFile, readFile }
 from @std/Json import { stringifyPretty, parse }
+from @std/Process import { execArgs, env }
+from @std/String import { trim, toLowerCase, replaceAll }
 from @std/Time import { date }
 from "./Models" import { Scope, ProjectMeta, Task, RoadmapItem, Plan, storeVersion }
 
@@ -84,7 +86,15 @@ fun writeInitialRoadmap(
 ): Result String Unit effects { IO } {
   match writeJson(scope.roadmapPath, emptyRoadmap) with:
     | Result.Err e -> Result.Err(e)
-    | Result.Ok _ -> writeJson(scope.plansPath, emptyPlans)
+    | Result.Ok _ -> writeInitialPlans(scope, emptyPlans)
+}
+
+fun writeInitialPlans(scope: Scope, emptyPlans: List Plan): Result String Unit effects { IO } {
+  match writeJson(scope.plansPath, emptyPlans) with:
+    | Result.Err e -> Result.Err(e)
+    | Result.Ok _ ->
+        maybeSyncBastionIngest(scope);
+        Result.Ok(())
 }
 
 @public
@@ -191,8 +201,11 @@ fun touchMeta(scope: Scope): Result String Unit effects { IO } {
     | Result.Err _ -> Result.Ok(())
     | Result.Ok meta ->
         let refreshed = { ...meta, updatedAt: date() };
-
-        writeJson(scope.metaPath, refreshed)
+        match writeJson(scope.metaPath, refreshed) with:
+          | Result.Err e -> Result.Err(e)
+          | Result.Ok _ ->
+              maybeSyncBastionIngest(scope);
+              Result.Ok(())
 }
 
 fun<a> writeJson(path: String, value: a): Result String Unit effects { IO } {
@@ -200,4 +213,55 @@ fun<a> writeJson(path: String, value: a): Result String Unit effects { IO } {
 
   writeFile(path, `${serialized}
 `)
+}
+
+fun maybeSyncBastionIngest(scope: Scope): Unit effects { IO } {
+  if !isBastionAutoIngestEnabled():
+    ()
+  else:
+    let token = resolveBastionIngestToken(scope);
+    if token == "":
+      ()
+    else:
+      let binary = resolveBastionBinary();
+      let args = [
+        "auth",
+        "ingest",
+        "path-now",
+        "--token",
+        token,
+        "--source-path",
+        scope.projectDir,
+        "--recursive",
+      ];
+      match execArgs(binary, args) with:
+        | Result.Err _ -> ()
+        | Result.Ok output -> if output.exitCode == 0:
+          ()
+        else:
+          ()
+}
+
+fun isBastionAutoIngestEnabled(): Bool effects { IO } {
+  let raw = toLowerCase(trim(env("BASE_BASTION_AUTO_INGEST")));
+  !(raw == "0" or raw == "false" or raw == "off")
+}
+
+fun resolveBastionBinary(): String effects { IO } {
+  let configured = trim(env("BASE_BASTION_BIN"));
+  if configured == "": "bastion" else: configured
+}
+
+fun resolveBastionIngestToken(scope: Scope): String effects { IO } {
+  let scopedName = scopedTokenEnvName(scope.projectKey);
+  let scopedToken = trim(env(scopedName));
+  if scopedToken != "":
+    scopedToken
+  else:
+    trim(env("BASE_BASTION_INGEST_TOKEN"))
+}
+
+fun scopedTokenEnvName(projectKey: String): String {
+  let normalized = replaceAll(projectKey, "-", "_");
+  `BASE_BASTION_INGEST_TOKEN_${normalized}`
 }

@@ -147,3 +147,32 @@ base search "onboarding"
 - Plan status values: `planned`, `active`, `done`.
 - Plan item status values: `todo`, `in_progress`, `done`.
 - Roadmap status values: `planned`, `active`, `done`.
+
+## Bastion Backup Integration
+
+When enabled, mutating `base` commands (tasks/plans/roadmap/tags/docs/init) trigger a best-effort Bastion ingest of the current project's `.base` data directory.
+
+Configure with env vars:
+
+```bash
+# optional; default is "bastion"
+export BASE_BASTION_BIN=bastion
+
+# default: enabled. set to 0/false/off to disable.
+export BASE_BASTION_AUTO_INGEST=true
+
+# global fallback ingest token
+export BASE_BASTION_INGEST_TOKEN=...
+
+# optional per-project token override:
+# BASE_BASTION_INGEST_TOKEN_<project_key_with_dashes_replaced_by_underscores>
+export BASE_BASTION_INGEST_TOKEN_my_repo_ab12cd34ef56=...
+```
+
+On each mutation, `base` runs:
+
+```bash
+bastion auth ingest path-now --token <token> --source-path <project .base dir> --recursive
+```
+
+If Bastion is unavailable or no token is configured, `base` continues normally (no command failure).
